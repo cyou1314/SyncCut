@@ -41,6 +41,19 @@ export class FeishuBitableClient {
     return payload.data ?? payload;
   }
 
+  async createBase({ name }) {
+    return this.requestJson('/open-apis/bitable/v1/apps', { method:'POST', body:{name, folder_token:''} });
+  }
+
+  async createTable({ appToken, name, primaryName }) {
+    return this.requestJson(`/open-apis/bitable/v1/apps/${encodeURIComponent(appToken)}/tables`, { method:'POST', body:{table:{name, fields:[{field_name:primaryName,type:1}]}} });
+  }
+
+  async createField({ appToken, tableId, spec }) {
+    const {field_name,type,property} = spec;
+    return this.requestJson(`/open-apis/bitable/v1/apps/${encodeURIComponent(appToken)}/tables/${encodeURIComponent(tableId)}/fields`, { method:'POST', body:{field_name,type,...(property ? {property} : {})} });
+  }
+
   async getBase({ appToken }) {
     return this.requestJson(`/open-apis/bitable/v1/apps/${encodeURIComponent(appToken)}`);
   }

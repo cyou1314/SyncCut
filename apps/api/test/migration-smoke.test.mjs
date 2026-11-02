@@ -3,6 +3,10 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { Pool } from "pg";
+import { createProvisioningJournal } from "../src/provisioning-journal.mjs";
+import { createUserGrantStore } from "../src/user-grant-store.mjs";
+import { createCredentialCipher } from "../src/credential-crypto.mjs";
+import { randomBytes } from "node:crypto";
 import { createAssetStore } from "../src/asset-store.mjs";
 
 test("PostgreSQL migration creates tenant-scoped tables and rejects cross-tenant job links", {
@@ -22,6 +26,12 @@ test("PostgreSQL migration creates tenant-scoped tables and rejects cross-tenant
     );
     await client.query(migration);
     await client.query(await readFile(new URL("../migrations/0002_full_sync.sql", import.meta.url), "utf8"));
+
+    await client.query(await readFile(new URL("../migrations/0003_attachment_extra.sql", import.meta.url), "utf8"));
+
+    await client.query(await readFile(new URL("../migrations/0004_provisioning.sql", import.meta.url), "utf8"));
+
+    await client.query(await readFile(new URL("../migrations/0005_user_credentials.sql", import.meta.url), "utf8"));
 
     const tenantA = (await client.query(
       "insert into tenants (display_name) values ('Team A') returning id",
@@ -44,10 +54,29 @@ test("PostgreSQL migration creates tenant-scoped tables and rejects cross-tenant
     )).rows[0].id;
 
     const storePool = { connect: async () => ({ query: client.query.bind(client), release() {} }) };
+    let clock = 1000000, refreshCalls = 0;
+    const grants = createUserGrantStore({pool:storePool,cipher:createCredentialCipher(randomBytes(32).toString('base64')),clientId:'cli',clientSecret:'secret',now:()=>clock,fetchImpl:async()=>{refreshCalls++;return new Response(JSON.stringify({code:0,access_token:'new-access',refresh_token:'new-refresh',expires_in:3600}));}});
+    await grants.saveGrant(tenantA,memberA,{accessToken:'old-access',refreshToken:'old-refresh',expiresIn:30});
+    assert.equal(await grants.provider(tenantA,memberA)(),'new-access');
+    assert.equal(await grants.provider(tenantA,memberA)(),'new-access');
+    assert.equal(refreshCalls,1);
+    await assert.rejects(grants.provider(tenantB,memberA)(), /authorization required/);
+    await grants.revoke(tenantA,memberA);
+    await assert.rejects(grants.provider(tenantA,memberA)(), /authorization required/);
+    await grants.saveGrant(tenantA,memberA,{accessToken:'again',refreshToken:'again-refresh',expiresIn:3600});
+    assert.equal(await grants.provider(tenantA,memberA)(),'again');
+    const journal = createProvisioningJournal(storePool);
+    await journal.withLock(tenantA, async j => {
+      await j.save({workspaceId:tenantA,creatorId:memberA,status:'running'});
+      assert.equal((await j.load(tenantA)).status,'running');
+      await assert.rejects(j.load(tenantB), /Workspace mismatch/);
+    });
+    await assert.rejects(journal.withLock(tenantB, j => j.save({workspaceId:tenantB,creatorId:memberA})), error => error.code === '23503');
     const store = createAssetStore(storePool, tenantA, connectionA);
     const asset = { recordId: 'rec1', name: 'rain', kind: 'sfx', project: null, episode: 'EP015', scene: null, shot: null, tags: [], notes: null, timing: {}, modified: null, attachment: {fileToken:'file1', name:'rain.wav', mimeType:'audio/wav', size:100} };
-    await store.upsert(asset);
-    await store.upsert(asset);
+    await store.upsert({...asset,attachment:{...asset.attachment,extra:'old'}});
+    await store.upsert({...asset,attachment:{...asset.attachment,extra:'new'}});
+    assert.equal((await client.query('select download_extra from asset_versions')).rows[0].download_extra, 'new');
     assert.equal((await client.query('select count(*)::int as n from asset_versions')).rows[0].n, 1);
     await store.upsert({...asset, attachment:{...asset.attachment,fileToken:'file2'}});
     assert.equal((await client.query('select count(*)::int as n from asset_versions')).rows[0].n, 2);

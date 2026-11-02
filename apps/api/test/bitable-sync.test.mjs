@@ -19,3 +19,11 @@ test('sync consumes pages, deduplicates records and reports invalid records', as
   const result=await fullSync({client,connection:{appToken:'base',tableId:'tbl',fieldMapping:ids},store:{upsert:async a=>saved.push(a)}});
   assert.equal(saved.length,1); assert.equal(result.duplicates,1); assert.equal(result.failed,1); assert.equal(result.errors[0].recordId,'bad');
 });
+
+test('preserves Feishu attachment permission extra without trusting arbitrary URLs', () => {
+  const extra='{"bitablePerm":{"tableId":"tbl","rev":32}}';
+  const r={...record,fields:{...record.fields,附件:[{...record.fields.附件[0],url:'https://open.feishu.cn/open-apis/drive/v1/medias/file1/download?extra='+encodeURIComponent(extra)}]}};
+  assert.equal(mapRecord(r,resolveMapping(ids,fields)).attachment.extra,extra);
+  r.fields.附件[0].url='https://evil.example/steal?extra=bad';
+  assert.throws(()=>mapRecord(r,resolveMapping(ids,fields)), /Invalid attachment URL/);
+});

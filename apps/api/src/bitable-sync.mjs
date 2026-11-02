@@ -23,6 +23,16 @@ function number(value, key) {
   if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) throw new Error(`Invalid ${key}`);
   return value;
 }
+// Preserve only the documented permission parameter, never arbitrary URLs or credentials.
+export function attachmentExtra(file) {
+  if (typeof file.url !== 'string') return null;
+  let url;
+  try { url = new URL(file.url); } catch { throw new Error('Invalid attachment URL'); }
+  if (url.protocol !== 'https:' || url.hostname !== 'open.feishu.cn' || url.pathname !== `/open-apis/drive/v1/medias/${encodeURIComponent(file.file_token)}/download`) throw new Error('Invalid attachment URL');
+  const values = url.searchParams.getAll('extra');
+  if (values.length > 1) throw new Error('Invalid attachment extra');
+  return values[0] ?? null;
+}
 export function mapRecord(record, mapping) {
   const f = record.fields ?? {};
   const value = key => mapping[key] ? f[mapping[key]] : null;
@@ -41,7 +51,7 @@ export function mapRecord(record, mapping) {
   if (tags != null && (!Array.isArray(tags) || tags.some(t => typeof t !== 'string'))) throw new Error('Invalid tags');
   const modified = value('modified');
   if (modified != null && (typeof modified !== 'number' || !Number.isFinite(modified) || !Number.isFinite(new Date(modified).getTime()))) throw new Error('Invalid modified timestamp');
-  return { recordId: record.record_id, name, kind, project: text(value('project')), episode: text(value('episode')), scene: text(value('scene')), shot: text(value('shot')), notes: text(value('notes')), tags: tags ?? [], timing: {...timing, track}, attachment: {fileToken: file.file_token, name: file.name ?? null, mimeType: file.type ?? null, size: number(file.size, 'attachment size')}, modified: modified == null ? null : new Date(modified).toISOString() };
+  return { recordId: record.record_id, name, kind, project: text(value('project')), episode: text(value('episode')), scene: text(value('scene')), shot: text(value('shot')), notes: text(value('notes')), tags: tags ?? [], timing: {...timing, track}, attachment: {fileToken: file.file_token, name: file.name ?? null, mimeType: file.type ?? null, size: number(file.size, 'attachment size'), extra: attachmentExtra(file)}, modified: modified == null ? null : new Date(modified).toISOString() };
 }
 
 export async function listAll(fetchPage) {

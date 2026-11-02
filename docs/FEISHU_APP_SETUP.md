@@ -103,3 +103,9 @@ Webhook 只传记录标识和更新时间，不传音频文件内容。SyncCut �
 控制台仍为演示原型，尚不能保存连接或发起同步。服务端提供试点命令 `node src/pilot-cli.mjs inspect` 和 `sync`，只可由可信的服务端管理员运行；不能将密钥交给浏览器。先应用 0001 和 0002 迁移，建立 tenant，并在服务端设置 `DATABASE_URL`、`SYNC_TENANT_ID`、`FEISHU_APP_ID`、`FEISHU_APP_SECRET`、`FEISHU_BASE_TOKEN`；检查指定数据表时还需 `FEISHU_TABLE_ID`。`inspect` 输出 Base、数据表和字段 ID。同步时设置 `FEISHU_FIELD_MAPPING` 为 JSON，键为 `name`, `kind`, `attachment`, `project`, `episode`, `scene`, `shot`, `tags`, `notes`, `start`, `inPoint`, `outPoint`, `track`, `volume`, `fadeIn`, `fadeOut`, `modified`，值为对应字段 ID；前三项必填。还需设置 32 字节 base64 的 `SYNC_CREDENTIAL_ENCRYPTION_KEY` 和独立的至少 32 字符随机 `SYNC_WEBHOOK_SECRET`。命令只读取环境变量；不要在 shell 历史或仓库中写入实际密钥。
 
 现有 Webhook 是自定义 Bearer 认证的工作流 HTTP 入口，**不是飞书原生事件订阅**。工作流能否配置自定义 HTTP 请求头及变量取决于实际企业版本和能力，尚未实测；如果不支持，不要启用该方案。目前也没有消费 inbox 的后台 worker、定时补偿扫描或状态回写，不能将该入口视为已完成实时同步。
+
+## M2.1 用户 OAuth 与自动建库开发状态
+
+服务端新增 OAuth v3 协议模块、PKCE 和一次性 state 校验接口，以及建库状态机与 PostgreSQL 日志存储。**这些模块尚未接入 HTTP 登录会话、凭证持久化、控制台或首次同步；目前不能通过控制台完成授权或自动建库。** OAuth 刷新返回的 refresh token 必须在加锁状态下与 access token 一起原子加密保存；未接入此流程前不要用于实际账号。
+
+建库模块按飞书官方接口定义字段，网络结果不明确时记录需要人工核对，不自动重试创建。它尚未接入授权用户身份、默认表复用和控制台；dry-run 为纯计划输出，不代表已创建资源。所需后台配置包括登记回调 URL，申请多维表格读写及用户信息权限，开通并在授权范围中声明 `offline_access`，发布应用后由用户同意授权。具体权限以应用后台及相关 API 当前要求为准。

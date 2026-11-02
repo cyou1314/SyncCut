@@ -23,8 +23,10 @@ export function createAssetStore(pool, tenantId, connectionId) {
         const prior = await db.query('select file_token, original_filename, mime_type, size_bytes from asset_versions where tenant_id=$1 and asset_id=$2 and version_number=$3', [tenantId,id,version]);
         const old = prior.rows[0], f = asset.attachment;
         if (!old || old.file_token !== f.fileToken || old.original_filename !== f.name || old.mime_type !== f.mimeType || (old.size_bytes == null ? null : Number(old.size_bytes)) !== f.size) {
-          await db.query('insert into asset_versions (tenant_id, asset_id, version_number, file_token, original_filename, mime_type, size_bytes, source_modified_at) values ($1,$2,$3,$4,$5,$6,$7,$8)', [tenantId,id,version+1,f.fileToken,f.name,f.mimeType,f.size,asset.modified]);
+          await db.query('insert into asset_versions (tenant_id, asset_id, version_number, file_token, original_filename, mime_type, size_bytes, source_modified_at, download_extra) values ($1,$2,$3,$4,$5,$6,$7,$8,$9)', [tenantId,id,version+1,f.fileToken,f.name,f.mimeType,f.size,asset.modified,f.extra ?? null]);
           await db.query('update media_assets set current_version=$1 where id=$2 and tenant_id=$3', [version+1,id,tenantId]);
+        } else {
+          await db.query('update asset_versions set download_extra=$1 where tenant_id=$2 and asset_id=$3 and version_number=$4', [f.extra ?? null,tenantId,id,version]);
         }
         await db.query('commit');
       } catch (error) { await db.query('rollback'); throw error; }
