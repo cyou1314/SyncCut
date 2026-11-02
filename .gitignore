@@ -1,0 +1,36 @@
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Swift / Xcode
+.build/
+DerivedData/
+*.xcuserstate
+*.xcuserdatad/
+
+# Web
+node_modules/
+dist/
+.next/
+.vite/
+coverage/
+
+# Secrets and local configuration
+.env
+.env.*
+!.env.example
+*.pem
+*.p12
+*.mobileprovision
+
+# Logs and local media
+*.log
+.cache/
+.tmp/
+*.partial
+*.wav
+*.mp3
+*.m4a
+*.aiff
+*.flac
