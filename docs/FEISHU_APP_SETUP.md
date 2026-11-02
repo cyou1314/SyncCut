@@ -100,12 +100,14 @@ Webhook 只传记录标识和更新时间，不传音频文件内容。SyncCut �
 
 ## 当前实现状态（M2.1 开发中）
 
-控制台仍为演示原型，尚不能保存连接或发起同步。服务端提供试点命令 `node src/pilot-cli.mjs inspect` 和 `sync`，只可由可信的服务端管理员运行；不能将密钥交给浏览器。先应用 0001 和 0002 迁移，建立 tenant，并在服务端设置 `DATABASE_URL`、`SYNC_TENANT_ID`、`FEISHU_APP_ID`、`FEISHU_APP_SECRET`、`FEISHU_BASE_TOKEN`；检查指定数据表时还需 `FEISHU_TABLE_ID`。`inspect` 输出 Base、数据表和字段 ID。同步时设置 `FEISHU_FIELD_MAPPING` 为 JSON，键为 `name`, `kind`, `attachment`, `project`, `episode`, `scene`, `shot`, `tags`, `notes`, `start`, `inPoint`, `outPoint`, `track`, `volume`, `fadeIn`, `fadeOut`, `modified`，值为对应字段 ID；前三项必填。还需设置 32 字节 base64 的 `SYNC_CREDENTIAL_ENCRYPTION_KEY` 和独立的至少 32 字符随机 `SYNC_WEBHOOK_SECRET`。命令只读取环境变量；不要在 shell 历史或仓库中写入实际密钥。
+旧的应用身份试点仍提供服务端命令 `node src/pilot-cli.mjs inspect` 和 `sync`，只可由可信的服务端管理员运行；不能将密钥交给浏览器。先按序应用全部迁移，建立 tenant，并在服务端设置 `DATABASE_URL`、`SYNC_TENANT_ID`、`FEISHU_APP_ID`、`FEISHU_APP_SECRET`、`FEISHU_BASE_TOKEN`；检查指定数据表时还需 `FEISHU_TABLE_ID`。`inspect` 输出 Base、数据表和字段 ID。同步时设置 `FEISHU_FIELD_MAPPING` 为 JSON，键为 `name`, `kind`, `attachment`, `project`, `episode`, `scene`, `shot`, `tags`, `notes`, `start`, `inPoint`, `outPoint`, `track`, `volume`, `fadeIn`, `fadeOut`, `modified`，值为对应字段 ID；前三项必填。还需设置 32 字节 base64 的 `SYNC_CREDENTIAL_ENCRYPTION_KEY` 和独立的至少 32 字符随机 `SYNC_WEBHOOK_SECRET`。命令只读取环境变量；不要在 shell 历史或仓库中写入实际密钥。
 
 现有 Webhook 是自定义 Bearer 认证的工作流 HTTP 入口，**不是飞书原生事件订阅**。工作流能否配置自定义 HTTP 请求头及变量取决于实际企业版本和能力，尚未实测；如果不支持，不要启用该方案。目前也没有消费 inbox 的后台 worker、定时补偿扫描或状态回写，不能将该入口视为已完成实时同步。
 
-## M2.1 用户 OAuth 与自动建库开发状态
+## M2.1 控制台试点配置
 
-服务端新增 OAuth v3 协议模块、PKCE 和一次性 state 校验接口，以及建库状态机与 PostgreSQL 日志存储。**这些模块尚未接入 HTTP 登录会话、凭证持久化、控制台或首次同步；目前不能通过控制台完成授权或自动建库。** OAuth 刷新返回的 refresh token 必须在加锁状态下与 access token 一起原子加密保存；未接入此流程前不要用于实际账号。
+先按序应用全部数据库迁移，在服务端密钥管理中设置 `DATABASE_URL`、`FEISHU_APP_ID`、`FEISHU_APP_SECRET`、`SYNC_CREDENTIAL_ENCRYPTION_KEY` 和 `PUBLIC_ORIGIN`。`PUBLIC_ORIGIN` 是实际服务的完整来源（不带末尾斜杠），必须是 HTTPS，唯独 localhost / 127.0.0.1 可用 HTTP。开发者后台的重定向 URL 必须精确配置为 `<PUBLIC_ORIGIN>/auth/feishu/callback`。该地址必须由实际部署环境确定，不能提前猜测。
 
-建库模块按飞书官方接口定义字段，网络结果不明确时记录需要人工核对，不自动重试创建。它尚未接入授权用户身份、默认表复用和控制台；dry-run 为纯计划输出，不代表已创建资源。所需后台配置包括登记回调 URL，申请多维表格读写及用户信息权限，开通并在授权范围中声明 `offline_access`，发布应用后由用户同意授权。具体权限以应用后台及相关 API 当前要求为准。
+启动 API 后访问同源 `/feishu.html`。控制台支持用户 OAuth、个人工作区、创建素材管理中心、检查和全量同步；令牌只保存在服务端。团队邀请和切换工作区尚未实现。网络超时导致创建结果不明确时将要求人工核对，不能自动恢复所有情况；目前飞书新建 Base 的默认表尚未复用，程序会创建独立的“素材表”。
+
+本流程目前仅通过 Mock 飞书和 PostgreSQL 自动化测试，没有用真实飞书凭证或现有企业做联调。不要把 Mock 测试视为真实授权、建表、同步成功。OAuth 权限需要 `bitable:app` 和 `offline_access` 用户身份授权；用户信息接口的基础字段以飞书官方现行文档为准。

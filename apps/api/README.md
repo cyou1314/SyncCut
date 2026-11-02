@@ -38,4 +38,4 @@ Apply all numbered migrations in order to a dedicated private PostgreSQL databas
 - Device pairing and task polling.
 - Jianying UI automation.
 
-OAuth and automatic provisioning modules are under development and are not exposed through the API or web console yet. See `docs/FEISHU_APP_SETUP.md` for current limitations.
+The Feishu console is available at `/feishu.html` when `PUBLIC_ORIGIN`, `FEISHU_APP_ID`, `FEISHU_APP_SECRET`, and `SYNC_CREDENTIAL_ENCRYPTION_KEY` are configured. Apply every migration first. Feishu OAuth and Bitable operations require real-account verification; see `docs/FEISHU_APP_SETUP.md` for limits.
