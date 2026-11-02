@@ -27,6 +27,8 @@ Apply all numbered migrations in order to a dedicated private PostgreSQL databas
 - `src/bitable-client.mjs`: Bitable record read and media download adapter.
 - `src/bitable-webhook.mjs`: Webhook authentication, validation and event de-duplication.
 - `src/credential-crypto.mjs`: AES-256-GCM helper for encrypted credential persistence.
+- `src/local-importer.mjs`: local CSV/XLSX + audio-folder/ZIP preview, SHA-256 verification, metadata-only updates and immutable audio versions. See `LOCAL_IMPORT.md`.
+- `src/archive-utils.mjs`: XLSX worksheet reader and bounded ZIP audio extraction using the macOS/Linux `unzip` utility.
 - `src/server.mjs`: HTTP entrypoint.
 
 ## Not implemented yet
@@ -36,6 +38,7 @@ Apply all numbered migrations in order to a dedicated private PostgreSQL databas
 - Bitable full-sync and event-processing workers.
 - Credential persistence wiring.
 - Device pairing and task polling.
+- Web UI / PostgreSQL integration for the local import module.
 - Jianying UI automation.
 
 The Feishu console is available at `/feishu.html` when `PUBLIC_ORIGIN`, `FEISHU_APP_ID`, `FEISHU_APP_SECRET`, and `SYNC_CREDENTIAL_ENCRYPTION_KEY` are configured. Apply every migration first. Feishu OAuth and Bitable operations require real-account verification; see `docs/FEISHU_APP_SETUP.md` for limits.
