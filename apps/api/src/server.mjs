@@ -100,7 +100,7 @@ const server = createServer(async (request, response) => {
   return sendJson(response, 404, { error: "not_found" }, requestId);
 });
 
-server.listen(config.port, "0.0.0.0", () => {
+server.listen(config.port, process.env.HOST ?? "127.0.0.1", () => {
   process.stdout.write(`SyncCut API listening on port ${config.port}\n`);
 });
 
