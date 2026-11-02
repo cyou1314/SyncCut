@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { Pool } from "pg";
+import { createAssetStore } from "../src/asset-store.mjs";
 
 test("PostgreSQL migration creates tenant-scoped tables and rejects cross-tenant job links", {
   skip: !process.env.TEST_DATABASE_URL,
@@ -20,6 +21,7 @@ test("PostgreSQL migration creates tenant-scoped tables and rejects cross-tenant
       "utf8",
     );
     await client.query(migration);
+    await client.query(await readFile(new URL("../migrations/0002_full_sync.sql", import.meta.url), "utf8"));
 
     const tenantA = (await client.query(
       "insert into tenants (display_name) values ('Team A') returning id",
@@ -40,6 +42,16 @@ test("PostgreSQL migration creates tenant-scoped tables and rejects cross-tenant
        returning id`,
       [tenantA, "a".repeat(64), memberA],
     )).rows[0].id;
+
+    const storePool = { connect: async () => ({ query: client.query.bind(client), release() {} }) };
+    const store = createAssetStore(storePool, tenantA, connectionA);
+    const asset = { recordId: 'rec1', name: 'rain', kind: 'sfx', project: null, episode: 'EP015', scene: null, shot: null, tags: [], notes: null, timing: {}, modified: null, attachment: {fileToken:'file1', name:'rain.wav', mimeType:'audio/wav', size:100} };
+    await store.upsert(asset);
+    await store.upsert(asset);
+    assert.equal((await client.query('select count(*)::int as n from asset_versions')).rows[0].n, 1);
+    await store.upsert({...asset, attachment:{...asset.attachment,fileToken:'file2'}});
+    assert.equal((await client.query('select count(*)::int as n from asset_versions')).rows[0].n, 2);
+    await assert.rejects(createAssetStore(storePool, tenantB, connectionA).upsert(asset), /Connection unavailable/);
 
     const deviceA = (await client.query(
       "insert into sync_devices (tenant_id, device_name, device_token_hash) values ($1, 'Mac A', $2) returning id",

@@ -41,6 +41,22 @@ export class FeishuBitableClient {
     return payload.data ?? payload;
   }
 
+  async getBase({ appToken }) {
+    return this.requestJson(`/open-apis/bitable/v1/apps/${encodeURIComponent(appToken)}`);
+  }
+
+  async listTables({ appToken, pageToken }) {
+    const query = new URLSearchParams({ page_size: "100" });
+    if (pageToken) query.set("page_token", pageToken);
+    return this.requestJson(`/open-apis/bitable/v1/apps/${encodeURIComponent(appToken)}/tables?${query}`);
+  }
+
+  async listFields({ appToken, tableId, pageToken }) {
+    const query = new URLSearchParams({ page_size: "100" });
+    if (pageToken) query.set("page_token", pageToken);
+    return this.requestJson(`/open-apis/bitable/v1/apps/${encodeURIComponent(appToken)}/tables/${encodeURIComponent(tableId)}/fields?${query}`);
+  }
+
   async listRecords({ appToken, tableId, pageToken, pageSize = 100 }) {
     const path = new URL(
       `/open-apis/bitable/v1/apps/${encodeURIComponent(appToken)}/tables/${encodeURIComponent(tableId)}/records`,

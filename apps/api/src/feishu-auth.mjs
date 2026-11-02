@@ -17,12 +17,15 @@ export function createCustomAppTokenProvider({
 
   let cachedToken = null;
   let expiresAt = 0;
+  let inflight = null;
 
   return async function getAccessToken() {
     if (cachedToken && expiresAt - now() > 60_000) {
       return cachedToken;
     }
 
+    if (inflight) return inflight;
+    inflight = (async () => {
     const response = await fetchImpl(TOKEN_ENDPOINT, {
       method: "POST",
       headers: { "Content-Type": "application/json; charset=utf-8" },
@@ -47,5 +50,7 @@ export function createCustomAppTokenProvider({
     cachedToken = payload.access_token;
     expiresAt = now() + expiresIn * 1000;
     return cachedToken;
+    })();
+    try { return await inflight; } finally { inflight = null; }
   };
 }

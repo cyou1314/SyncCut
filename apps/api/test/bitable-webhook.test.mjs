@@ -46,3 +46,13 @@ test("event key is deterministic for the same event", () => {
   });
   assert.equal(makeBitableEventKey("connection-1", eventA), makeBitableEventKey("connection-1", eventB));
 });
+
+test('accepted webhook delivery is deduplicated by the inbox', async () => {
+  const { acceptBitableWebhook } = await import('../src/bitable-webhook.mjs');
+  let count=0;
+  const db={query:async sql => sql.includes('select id') ? {rows:[{id:'conn',tenant_id:'tenant',app_token:'base',table_id:'tbl',webhook_secret_hash:hashWebhookSecret('secret')}]} : {rowCount:count++ ? 0 : 1}};
+  const input={db,connectionId:'conn',authorization:'Bearer secret',payload:{record_id:'rec',app_token:'base',table_id:'tbl'}};
+  assert.equal((await acceptBitableWebhook(input)).body.duplicate,false);
+  assert.equal((await acceptBitableWebhook(input)).body.duplicate,true);
+  assert.equal((await acceptBitableWebhook({...input,authorization:'Bearer wrong'})).status,401);
+});

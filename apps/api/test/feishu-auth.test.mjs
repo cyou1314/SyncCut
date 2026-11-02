@@ -37,3 +37,10 @@ test("custom-app token provider does not expose provider response details", asyn
   });
   await assert.rejects(provider(), /Unable to obtain Feishu tenant access token/);
 });
+
+test('simultaneous token requests share a single refresh', async () => {
+  let calls=0;
+  const provider=createCustomAppTokenProvider({clientId:'id',clientSecret:'secret',fetchImpl:async()=>{calls++; await new Promise(resolve=>setTimeout(resolve,5)); return new Response(JSON.stringify({code:0,access_token:'token',expires_in:3600}));}});
+  assert.deepEqual(await Promise.all([provider(),provider(),provider()]),['token','token','token']);
+  assert.equal(calls,1);
+});

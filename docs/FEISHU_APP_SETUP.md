@@ -40,7 +40,7 @@
 自建应用当前应用身份 Token 流程：
 - 使用飞书官方当前文档指定的 OAuth token endpoint；
 - 读取响应中的 `expires_in` 缓存，不硬编码过期时间；
-- 服务端负责续期和错误重试。
+- 服务端在过期前重新获取；当前尚无自动错误重试。
 
 ## 4. 配置多维表格
 
@@ -50,7 +50,9 @@
 4. 在 SyncCut 控制台创建连接并保存字段映射。
 5. 不要把 Base 设为公开链接来替代 API 授权。
 
-## 5. 配置实时触发工作流
+## 5. 实时触发工作流（设想，尚未验证）
+
+以下工作流能力和变量是否可用需在实际飞书企业版本中确认；目前也没有处理 inbox 的 worker。
 
 在素材表所在的多维表格中创建工作流/自动化：
 
@@ -79,7 +81,7 @@ Webhook 只传记录标识和更新时间，不传音频文件内容。SyncCut �
 
 ## 6. 可靠性
 
-- 工作流 Webhook 是首选快速触发机制。
+- 工作流 Webhook 是待验证的快速触发候选方案，不是飞书原生事件接口。
 - SyncCut 仍需定时执行补偿扫描，避免自动化未运行、请求超时或网络故障导致漏同步。
 - 飞书工作流 HTTP 请求有请求体大小和执行时长限制；只发送轻量 JSON。
 - 对同一数据表的写操作应串行或限流，避免飞书返回写冲突。
@@ -95,3 +97,9 @@ Webhook 只传记录标识和更新时间，不传音频文件内容。SyncCut �
 5. 完成飞书审核、权限说明、租户隔离和撤销授权测试。
 
 当前不要把单企业自建应用凭证复用于其他企业。
+
+## 当前实现状态（M2.1 开发中）
+
+控制台仍为演示原型，尚不能保存连接或发起同步。服务端提供试点命令 `node src/pilot-cli.mjs inspect` 和 `sync`，只可由可信的服务端管理员运行；不能将密钥交给浏览器。先应用 0001 和 0002 迁移，建立 tenant，并在服务端设置 `DATABASE_URL`、`SYNC_TENANT_ID`、`FEISHU_APP_ID`、`FEISHU_APP_SECRET`、`FEISHU_BASE_TOKEN`；检查指定数据表时还需 `FEISHU_TABLE_ID`。`inspect` 输出 Base、数据表和字段 ID。同步时设置 `FEISHU_FIELD_MAPPING` 为 JSON，键为 `name`, `kind`, `attachment`, `project`, `episode`, `scene`, `shot`, `tags`, `notes`, `start`, `inPoint`, `outPoint`, `track`, `volume`, `fadeIn`, `fadeOut`, `modified`，值为对应字段 ID；前三项必填。还需设置 32 字节 base64 的 `SYNC_CREDENTIAL_ENCRYPTION_KEY` 和独立的至少 32 字符随机 `SYNC_WEBHOOK_SECRET`。命令只读取环境变量；不要在 shell 历史或仓库中写入实际密钥。
+
+现有 Webhook 是自定义 Bearer 认证的工作流 HTTP 入口，**不是飞书原生事件订阅**。工作流能否配置自定义 HTTP 请求头及变量取决于实际企业版本和能力，尚未实测；如果不支持，不要启用该方案。目前也没有消费 inbox 的后台 worker、定时补偿扫描或状态回写，不能将该入口视为已完成实时同步。
