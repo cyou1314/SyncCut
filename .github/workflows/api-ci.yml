@@ -4,12 +4,10 @@ on:
   push:
     paths:
       - "apps/api/**"
-      - "apps/web/**"
       - ".github/workflows/api-ci.yml"
   pull_request:
     paths:
       - "apps/api/**"
-      - "apps/web/**"
       - ".github/workflows/api-ci.yml"
 
 jobs:
