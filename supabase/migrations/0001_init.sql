@@ -132,6 +132,15 @@ as $$
   );
 $$;
 
+create or replace function public.is_workspace_owner(target_workspace uuid)
+returns boolean language sql stable security definer set search_path = public
+as $
+  select exists (
+    select 1 from public.workspaces w
+    where w.id = target_workspace and w.owner_id = auth.uid()
+  );
+$;
+
 create or replace function public.has_workspace_role(target_workspace uuid, allowed_roles text[])
 returns boolean language sql stable security definer set search_path = public
 as $$
@@ -182,10 +191,7 @@ on public.workspace_members for insert to authenticated
 with check (
   user_id = auth.uid()
   and role = 'admin'
-  and exists (
-    select 1 from public.workspaces w
-    where w.id = workspace_id and w.owner_id = auth.uid()
-  )
+  and public.is_workspace_owner(workspace_id)
 );
 
 create policy "admins can manage memberships"
