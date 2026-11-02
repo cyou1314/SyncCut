@@ -1,5 +1,7 @@
 import { createServer } from "node:http";
 import { randomUUID } from "node:crypto";
+import { readFile } from "node:fs/promises";
+import { createConsoleRoutes } from "./console-routes.mjs";
 import { Pool } from "pg";
 import { loadConfig } from "./config.mjs";
 import { acceptBitableWebhook } from "./bitable-webhook.mjs";
@@ -14,6 +16,9 @@ const pool = new Pool({
   max: 10,
   application_name: "synccut-api",
 });
+
+const consoleEnabled = !!(process.env.FEISHU_APP_ID && process.env.FEISHU_APP_SECRET && process.env.SYNC_CREDENTIAL_ENCRYPTION_KEY && process.env.PUBLIC_ORIGIN);
+const consoleRoutes = consoleEnabled ? createConsoleRoutes({pool,appId:process.env.FEISHU_APP_ID,appSecret:process.env.FEISHU_APP_SECRET,encryptionKey:process.env.SYNC_CREDENTIAL_ENCRYPTION_KEY,publicOrigin:process.env.PUBLIC_ORIGIN}) : null;
 
 function sendJson(response, status, body, requestId) {
   response.writeHead(status, {
@@ -49,6 +54,14 @@ const server = createServer(async (request, response) => {
   const requestId = randomUUID();
   const url = new URL(request.url ?? "/", "http://localhost");
 
+  if (request.method === "GET" && (url.pathname === "/feishu.html" || url.pathname === "/")) {
+    const file = new URL(url.pathname === "/" ? "../../web/index.html" : "../../web/feishu.html", import.meta.url);
+    try {const html=await readFile(file);response.writeHead(200,{"Content-Type":"text/html; charset=utf-8","Cache-Control":"no-store","X-Content-Type-Options":"nosniff","Referrer-Policy":"no-referrer"});response.end(html);}
+    catch {sendJson(response,500,{error:"page_unavailable"},requestId);} return;
+  }
+  if (consoleRoutes && (url.pathname.startsWith('/api/console/') || url.pathname.startsWith('/auth/feishu/'))) {
+    try { await consoleRoutes(request,response,url); } catch { sendJson(response,500,{error:'internal_error'},requestId); } return;
+  }
   if (request.method === "GET" && url.pathname === "/health") {
     try {
       await pool.query("select 1");

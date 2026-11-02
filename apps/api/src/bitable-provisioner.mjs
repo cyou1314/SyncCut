@@ -34,6 +34,7 @@ export async function provisionBitable({client,journal,workspaceId,creatorId,dry
     if (!state) { state={workspaceId,creatorId,status:'running',baseToken:null,tableId:null,fields:{},pending:null}; await active.save(state); }
     if (state.creatorId!==creatorId) throw new Error('Provisioning owner mismatch');
     if (state.pending || state.status==='needs_review') throw new Error('Creation outcome requires manual review');
+    state.status='running';state.lastError=null;await active.save(state);
     const write = async (kind, action) => {
       state.pending=kind; await active.save(state);
       try { const result=await action(); return result; }

@@ -78,7 +78,7 @@ export async function inspectConnection(client, appToken, tableId) {
 
 // Caller supplies an authenticated, tenant-scoped connection and persistence adapter.
 // Never infer deletions from a scan: records may move during pagination.
-export async function fullSync({client, connection, store}) {
+export async function fullSync({client, connection, store, onProgress = async () => {}}) {
   const {appToken, tableId, fieldMapping} = connection;
   const {fields} = await inspectConnection(client, appToken, tableId);
   const mapping = resolveMapping(fieldMapping, fields);
@@ -92,6 +92,7 @@ export async function fullSync({client, connection, store}) {
       if (record.record_id) seen.add(record.record_id);
       try { await store.upsert(mapRecord(record, mapping)); imported++; }
       catch (error) { failed++; errors.push({recordId: record.record_id ?? null, reason: error.message.startsWith('Record ') || error.message.startsWith('Invalid ') ? error.message : 'Unable to persist record'}); }
+      await onProgress({imported,duplicates,failed});
     }
     if (!page.has_more) break;
     if (!page.page_token || pages.has(page.page_token)) throw new Error('Invalid or repeated page token');
