@@ -1,0 +1,29 @@
+name: API checks
+
+on:
+  push:
+    paths:
+      - "apps/api/**"
+      - ".github/workflows/api-ci.yml"
+  pull_request:
+    paths:
+      - "apps/api/**"
+      - ".github/workflows/api-ci.yml"
+
+jobs:
+  node-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install API dependencies
+        working-directory: apps/api
+        run: npm install --no-audit --no-fund
+      - name: Check JavaScript syntax
+        working-directory: apps/api
+        run: find src test -name '*.mjs' -print0 | xargs -0 -n1 node --check
+      - name: Run API unit tests
+        working-directory: apps/api
+        run: npm test
