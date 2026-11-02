@@ -18,7 +18,7 @@ const pool = new Pool({
 });
 
 const consoleEnabled = !!(process.env.FEISHU_APP_ID && process.env.FEISHU_APP_SECRET && process.env.SYNC_CREDENTIAL_ENCRYPTION_KEY && process.env.PUBLIC_ORIGIN);
-const consoleRoutes = consoleEnabled ? createConsoleRoutes({pool,appId:process.env.FEISHU_APP_ID,appSecret:process.env.FEISHU_APP_SECRET,encryptionKey:process.env.SYNC_CREDENTIAL_ENCRYPTION_KEY,publicOrigin:process.env.PUBLIC_ORIGIN}) : null;
+const consoleRoutes = consoleEnabled ? createConsoleRoutes({pool,appId:process.env.FEISHU_APP_ID,appSecret:process.env.FEISHU_APP_SECRET,encryptionKey:process.env.SYNC_CREDENTIAL_ENCRYPTION_KEY,publicOrigin:process.env.PUBLIC_ORIGIN,appMode:process.env.FEISHU_APP_MODE ?? 'custom_app'}) : null;
 
 function sendJson(response, status, body, requestId) {
   response.writeHead(status, {

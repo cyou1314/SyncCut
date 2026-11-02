@@ -26,13 +26,19 @@ export async function bindPersonalWorkspace(pool,{user,appId,sessionId}) {
   const db=await pool.connect();
   try {
     await db.query('begin');
-    await db.query('select pg_advisory_xact_lock(hashtextextended($1,0))',[`personal:${appId}:${user.tenantKey}:${user.openId}`]);
-    let found=await db.query(`select tenant_id,member_id from feishu_personal_workspaces where app_id=$1 and feishu_tenant_key=$2 and feishu_open_id=$3`,[appId,user.tenantKey,user.openId]);
+    if (!appId || !user.openId || (user.tenantKey != null && !user.tenantKey)) throw new Error('Invalid Feishu identity');
+    const personal=user.tenantKey == null;
+    const key=JSON.stringify([appId,personal?'personal':'tenant',user.tenantKey,user.openId]);
+    await db.query('select pg_advisory_xact_lock(hashtextextended($1,0))',[key]);
+    let found=personal
+      ? await db.query('select tenant_id,member_id from feishu_personal_accounts where app_id=$1 and feishu_open_id=$2',[appId,user.openId])
+      : await db.query('select tenant_id,member_id from feishu_personal_workspaces where app_id=$1 and feishu_tenant_key=$2 and feishu_open_id=$3',[appId,user.tenantKey,user.openId]);
     let identity=found.rows[0];
     if(!identity) {
       const tenant=(await db.query('insert into tenants (display_name) values ($1) returning id',[`${user.name || '用户'}的工作区`])).rows[0].id;
       const member=(await db.query("insert into tenant_members (tenant_id,feishu_user_id,display_name,role) values ($1,$2,$3,'owner') returning id",[tenant,user.openId,user.name])).rows[0].id;
-      await db.query('insert into feishu_personal_workspaces (app_id,feishu_tenant_key,feishu_open_id,tenant_id,member_id) values ($1,$2,$3,$4,$5)',[appId,user.tenantKey,user.openId,tenant,member]);
+      if (personal) await db.query('insert into feishu_personal_accounts (app_id,feishu_open_id,tenant_id,member_id) values ($1,$2,$3,$4)',[appId,user.openId,tenant,member]);
+      else await db.query('insert into feishu_personal_workspaces (app_id,feishu_tenant_key,feishu_open_id,tenant_id,member_id) values ($1,$2,$3,$4,$5)',[appId,user.tenantKey,user.openId,tenant,member]);
       identity={tenant_id:tenant,member_id:member};
     }
     const active=await db.query("select 1 from tenant_members m join tenants t on t.id=m.tenant_id where m.id=$1 and m.tenant_id=$2 and m.status='active' and t.status='active'",[identity.member_id,identity.tenant_id]);

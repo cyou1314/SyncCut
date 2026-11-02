@@ -19,3 +19,12 @@ test('refresh returns rotated token and hides error response',async()=>{
  assert.equal(r.refreshToken,'rotated');
  await assert.rejects(refreshUserTokens({...config,refreshToken:'old',fetchImpl:async()=>new Response(JSON.stringify({code:1,detail:'secret'}))}),e=>!e.message.includes('secret'));
 });
+
+test('store app can handle a personal user without a tenant key; custom app fails closed',async()=>{
+ for(const mode of ['store_app','custom_app']) {
+  const stateStore=store();const url=new URL(await startUserAuthorization({stateStore,sessionId:'s',...config,scopes:['offline_access']}));
+  let i=0;const fetchImpl=async()=>++i===1?new Response(JSON.stringify({code:0,access_token:'access',refresh_token:'refresh',expires_in:3600})):new Response(JSON.stringify({code:0,data:{open_id:'ou_person',name:'User'}}));
+  const attempt=completeUserAuthorization({stateStore,sessionId:'s',state:url.searchParams.get('state'),code:'code',...config,appMode:mode,fetchImpl});
+  if(mode==='store_app')assert.equal((await attempt).user.tenantKey,null);else await assert.rejects(attempt,/identity/);
+ }
+});

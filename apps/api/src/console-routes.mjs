@@ -10,7 +10,8 @@ import { fullSync,inspectConnection } from './bitable-sync.mjs';
 import { createAssetStore } from './asset-store.mjs';
 import { newSessionId,sessionDigest,sessionFromCookie,sessionCookie,requireSameOrigin,findSession,bindPersonalWorkspace } from './console-auth.mjs';
 
-export function createConsoleRoutes({pool,appId,appSecret,encryptionKey,publicOrigin,fetchImpl=fetch}) {
+export function createConsoleRoutes({pool,appId,appSecret,encryptionKey,publicOrigin,appMode='custom_app',fetchImpl=fetch}) {
+  if(!['custom_app','store_app'].includes(appMode)) throw new Error('Invalid FEISHU_APP_MODE');
   const origin=new URL(publicOrigin);
   if(origin.origin!==publicOrigin || (origin.protocol!=='https:' && !(origin.protocol==='http:' && ['localhost','127.0.0.1'].includes(origin.hostname)))) throw new Error('PUBLIC_ORIGIN must be an HTTPS origin or loopback HTTP origin');
   const cipher=createCredentialCipher(encryptionKey), states=createOAuthStateStore({db:pool,cipher}), grants=createUserGrantStore({pool,cipher,clientId:appId,clientSecret:appSecret,fetchImpl}), journal=createProvisioningJournal(pool);
@@ -37,7 +38,7 @@ export function createConsoleRoutes({pool,appId,appSecret,encryptionKey,publicOr
       }
       if(req.method==='GET' && url.pathname==='/auth/feishu/callback') {
         if(!sid || !actor || actor.member_id || url.searchParams.has('error')) return redirect(res,'/feishu.html?auth=failed'),true;
-        const result=await completeUserAuthorization({stateStore:states,sessionId:sid,state:url.searchParams.get('state'),code:url.searchParams.get('code'),clientId:appId,clientSecret:appSecret,redirectUri,fetchImpl});
+        const result=await completeUserAuthorization({stateStore:states,sessionId:sid,state:url.searchParams.get('state'),code:url.searchParams.get('code'),clientId:appId,clientSecret:appSecret,redirectUri,appMode,fetchImpl});
         const identity=await bindPersonalWorkspace(pool,{user:result.user,appId,sessionId:sid});
         await grants.saveGrant(identity.tenant_id,identity.member_id,result.tokens);
         return redirect(res,'/feishu.html?auth=ok',{'Set-Cookie':sessionCookie(identity.sessionId,{secure})}),true;
@@ -63,9 +64,9 @@ export function createConsoleRoutes({pool,appId,appSecret,encryptionKey,publicOr
           }
           const secretHash=createHash('sha256').update(randomBytes(32)).digest('hex');
           await pool.query(`insert into feishu_connections (tenant_id,app_mode,token_mode,app_id,app_token,table_id,field_mapping,webhook_secret_hash,connected_by_member_id)
-            values ($1,'custom_app','user_access_token',$2,$3,$4,$5::jsonb,$6,$7)
+            values ($1,$8,'user_access_token',$2,$3,$4,$5::jsonb,$6,$7)
             on conflict (tenant_id,app_token,table_id) do update set field_mapping=excluded.field_mapping,updated_at=now()
-            where feishu_connections.connected_by_member_id=excluded.connected_by_member_id and feishu_connections.token_mode='user_access_token'`,[actor.tenant_id,appId,result.baseToken,result.tableId,JSON.stringify(result.fields),secretHash,actor.member_id]);
+            where feishu_connections.connected_by_member_id=excluded.connected_by_member_id and feishu_connections.token_mode='user_access_token' and feishu_connections.app_mode=excluded.app_mode and feishu_connections.app_id=excluded.app_id`,[actor.tenant_id,appId,result.baseToken,result.tableId,JSON.stringify(result.fields),secretHash,actor.member_id,appMode]);
         });
         return send(res,202,{started}),true;
       }

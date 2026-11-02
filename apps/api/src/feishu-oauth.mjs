@@ -24,7 +24,8 @@ async function tokenRequest(fetchImpl, body) {
   return { accessToken:json.access_token, refreshToken:json.refresh_token, expiresIn:json.expires_in, refreshExpiresIn:json.refresh_token_expires_in ?? null, scope:json.scope ?? '' };
 }
 
-export async function completeUserAuthorization({stateStore,sessionId,state,code,clientId,clientSecret,redirectUri,fetchImpl=fetch}) {
+export async function completeUserAuthorization({stateStore,sessionId,state,code,clientId,clientSecret,redirectUri,appMode='custom_app',fetchImpl=fetch}) {
+  if (!['custom_app','store_app'].includes(appMode)) throw new Error('Invalid Feishu app mode');
   if (!sessionId || typeof state !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(state) || !code) throw new Error('Invalid OAuth callback');
   const hash=createHash('sha256').update(state).digest('hex');
   const attempt=await stateStore.consume({hash,sessionId,now:Date.now()});
@@ -32,8 +33,8 @@ export async function completeUserAuthorization({stateStore,sessionId,state,code
   const tokens=await tokenRequest(fetchImpl,{grant_type:'authorization_code',client_id:clientId,client_secret:clientSecret,code,redirect_uri:redirectUri,code_verifier:attempt.verifier});
   const response=await fetchImpl(USER_INFO_ENDPOINT,{headers:{Authorization:`Bearer ${tokens.accessToken}`}});
   const json=await response.json().catch(()=>({}));
-  if (!response.ok || json.code !== 0 || !json.data?.open_id || !json.data?.tenant_key) throw new Error('Unable to read Feishu user identity');
-  return {tokens, user:{openId:json.data.open_id,tenantKey:json.data.tenant_key,name:json.data.name ?? ''}};
+  if (!response.ok || json.code !== 0 || typeof json.data?.open_id !== 'string' || !json.data.open_id || (json.data.tenant_key != null && (typeof json.data.tenant_key !== 'string' || !json.data.tenant_key)) || (appMode === 'custom_app' && !json.data.tenant_key)) throw new Error('Unable to read Feishu user identity');
+  return {tokens, user:{openId:json.data.open_id,tenantKey:json.data.tenant_key ?? null,name:json.data.name ?? ''}};
 }
 
 // Caller must serialize by credential across all processes and atomically replace the
