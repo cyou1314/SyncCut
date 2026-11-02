@@ -45,7 +45,7 @@ const assets=[
 {id:"a1",name:"宴会厅人群底噪",kind:"ambience",duration:54,tags:"人群 / 宴会",status:"已同步",start:0,track:"A2 · 氛围层",volume:28,fadeIn:1.5,fadeOut:1.5}
 ];
 let current="m1",selected=new Set(),filter="all",localURLs={};
-const $=id=>document.getElementById(id),time=s=>"00:"+String(Math.floor(s)).padStart(2,"0");
+const $=id=>document.getElementById(id),time=s=>String(Math.floor(s/60)).padStart(2,"0")+":"+String(Math.floor(s%60)).padStart(2,"0");
 function visible(){const q=$("search").value.trim().toLowerCase();return assets.filter(a=>(filter==="all"||a.kind===filter)&&(!q||(a.name+" "+a.tags).toLowerCase().includes(q)))}
 function render(){const rows=visible();$("list").innerHTML=rows.length?rows.map(a=>'<div class="asset '+(a.id===current?'selected':'')+'" data-id="'+a.id+'"><input type="checkbox" data-check="'+a.id+'" '+(selected.has(a.id)?'checked':'')+'><div><strong>'+a.name+'</strong><small>'+a.tags+'</small></div><span class="pill">'+({music:"音乐",sfx:"音效",voice:"配音",ambience:"环境音"}[a.kind])+'</span><span class="muted">'+time(a.duration)+'</span><span class="status">'+a.status+'</span></div>').join(""):'<div class="empty">没有匹配的素材</div>';
 document.querySelectorAll(".asset").forEach(el=>el.onclick=e=>{if(e.target.type==="checkbox")return;current=el.dataset.id;loadDetail();render()});
