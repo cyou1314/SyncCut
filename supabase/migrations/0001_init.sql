@@ -177,6 +177,17 @@ create policy "members can read memberships"
 on public.workspace_members for select to authenticated
 using (public.is_workspace_member(workspace_id));
 
+create policy "workspace owners can bootstrap admin membership"
+on public.workspace_members for insert to authenticated
+with check (
+  user_id = auth.uid()
+  and role = 'admin'
+  and exists (
+    select 1 from public.workspaces w
+    where w.id = workspace_id and w.owner_id = auth.uid()
+  )
+);
+
 create policy "admins can manage memberships"
 on public.workspace_members for all to authenticated
 using (public.has_workspace_role(workspace_id, array['admin']))
