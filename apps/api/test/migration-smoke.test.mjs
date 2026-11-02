@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { Pool } from "pg";
 import { createProvisioningJournal } from "../src/provisioning-journal.mjs";
+import { createOAuthStateStore } from "../src/oauth-state-store.mjs";
 import { createUserGrantStore } from "../src/user-grant-store.mjs";
 import { createCredentialCipher } from "../src/credential-crypto.mjs";
 import { randomBytes } from "node:crypto";
@@ -32,6 +33,14 @@ test("PostgreSQL migration creates tenant-scoped tables and rejects cross-tenant
     await client.query(await readFile(new URL("../migrations/0004_provisioning.sql", import.meta.url), "utf8"));
 
     await client.query(await readFile(new URL("../migrations/0005_user_credentials.sql", import.meta.url), "utf8"));
+
+    await client.query(await readFile(new URL("../migrations/0006_oauth_states.sql", import.meta.url), "utf8"));
+
+    const states = createOAuthStateStore({db:client,cipher:createCredentialCipher(randomBytes(32).toString("base64"))});
+    await states.create({hash:"d".repeat(64),sessionId:"browser-one",verifier:"verifier",expiresAt:Date.now()+60000});
+    assert.equal(await states.consume({hash:"d".repeat(64),sessionId:"browser-two",now:Date.now()}),null);
+    assert.equal((await states.consume({hash:"d".repeat(64),sessionId:"browser-one",now:Date.now()})).verifier,"verifier");
+    assert.equal(await states.consume({hash:"d".repeat(64),sessionId:"browser-one",now:Date.now()}),null);
 
     const tenantA = (await client.query(
       "insert into tenants (display_name) values ('Team A') returning id",
@@ -65,6 +74,10 @@ test("PostgreSQL migration creates tenant-scoped tables and rejects cross-tenant
     await assert.rejects(grants.provider(tenantA,memberA)(), /authorization required/);
     await grants.saveGrant(tenantA,memberA,{accessToken:'again',refreshToken:'again-refresh',expiresIn:3600});
     assert.equal(await grants.provider(tenantA,memberA)(),'again');
+    clock += 4000000;
+    const failingGrants = createUserGrantStore({pool:storePool,cipher:createCredentialCipher(randomBytes(32).toString('base64')),clientId:'cli',clientSecret:'secret',now:()=>clock});
+    // A different cipher cannot decrypt a grant and cannot expose it across stores.
+    await assert.rejects(failingGrants.provider(tenantA,memberA)());
     const journal = createProvisioningJournal(storePool);
     await journal.withLock(tenantA, async j => {
       await j.save({workspaceId:tenantA,creatorId:memberA,status:'running'});

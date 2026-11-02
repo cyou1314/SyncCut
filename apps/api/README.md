@@ -19,7 +19,7 @@ npm test
 npm start
 ```
 
-Apply `migrations/0001_feishu_control_plane.sql` to a dedicated private PostgreSQL database before starting the API.
+Apply all numbered migrations in order to a dedicated private PostgreSQL database before starting the API.
 
 ## Modules
 
@@ -37,3 +37,5 @@ Apply `migrations/0001_feishu_control_plane.sql` to a dedicated private PostgreS
 - Credential persistence wiring.
 - Device pairing and task polling.
 - Jianying UI automation.
+
+OAuth and automatic provisioning modules are under development and are not exposed through the API or web console yet. See `docs/FEISHU_APP_SETUP.md` for current limitations.

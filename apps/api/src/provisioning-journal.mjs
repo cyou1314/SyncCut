@@ -24,8 +24,9 @@ export function createProvisioningJournal(pool) {
         };
         return await fn(scoped);
       } finally {
-        if(locked) await db.query('select pg_advisory_unlock(hashtextextended($1, 0))',[`synccut-provision:${workspaceId}`]).catch(()=>{});
-        db.release();
+        let broken=false;
+        if(locked) await db.query('select pg_advisory_unlock(hashtextextended($1, 0))',[`synccut-provision:${workspaceId}`]).catch(()=>{broken=true});
+        db.release(broken);
       }
     },
   };

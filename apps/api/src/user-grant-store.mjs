@@ -8,7 +8,7 @@ export function createUserGrantStore({pool,cipher,clientId,clientSecret,fetchImp
     if (!tenantId || !memberId) throw new Error('Workspace and member are required');
     const db=await pool.connect(), key=`synccut-grant:${tenantId}:${memberId}`; let hasLock=false;
     try {await db.query('select pg_advisory_lock(hashtextextended($1,0))',[key]);hasLock=true;return await fn(db);}
-    finally {if(hasLock) await db.query('select pg_advisory_unlock(hashtextextended($1,0))',[key]).catch(()=>{});db.release();}
+    finally {let broken=false; if(hasLock) await db.query('select pg_advisory_unlock(hashtextextended($1,0))',[key]).catch(()=>{broken=true});db.release(broken);}
   }
   function seal(tenantId,memberId,tokens) {
     if (!tokens.accessToken || !tokens.refreshToken || !Number.isFinite(tokens.expiresIn) || tokens.expiresIn<=0) throw new Error('Invalid user grant');
@@ -29,6 +29,7 @@ export function createUserGrantStore({pool,cipher,clientId,clientSecret,fetchImp
       return ()=>locked(tenantId,memberId,async db=>{
         const result=await db.query('select * from feishu_user_grants where tenant_id=$1 and member_id=$2',[tenantId,memberId]);
         const row=result.rows[0];
+        if(row?.status==='refreshing') await db.query("update feishu_user_grants set status='needs_reauth',updated_at=now() where tenant_id=$1 and member_id=$2",[tenantId,memberId]);
         if(!row || row.status!=='active') throw new Error('Feishu authorization required');
         const tokens=JSON.parse(cipher.decrypt({ciphertext:row.ciphertext,nonce:row.nonce,tag:row.tag}));
         if(tokens.tenantId!==tenantId || tokens.memberId!==memberId) throw new Error('Credential binding mismatch');

@@ -6,3 +6,10 @@ test('dry-run does not write; creates and saves field IDs without duplication on
 test('ambiguous create outcome never retries',async()=>{const f=fixture();f.client.createBase=async()=>{throw new Error('timeout')};const args={...f,workspaceId:'w',creatorId:'u'};await assert.rejects(provisionBitable(args),/manual review/);await assert.rejects(provisionBitable(args),/manual review/)});
 test('existing incompatible field fails without overwriting',async()=>{const f=fixture(),args={...f,workspaceId:'w',creatorId:'u'};await provisionBitable(args);f.fields.find(x=>x.field_name==='素材类型').type=1;await assert.rejects(provisionBitable(args),/Field conflict/)});
 test('saved field identity cannot silently switch to a replacement',async()=>{const f=fixture(),args={...f,workspaceId:'w',creatorId:'u'};await provisionBitable(args);f.fields.find(x=>x.field_name==='音频附件').field_id='replacement';await assert.rejects(provisionBitable(args),/Field ID changed/)});
+test('failed write preserves earlier steps and does not retry ambiguous creation',async()=>{
+ const f=fixture(), original=f.client.createField;let n=0;f.client.createField=async request=>{if(++n===3)throw new Error('timeout');return original(request)};
+ const args={...f,workspaceId:'w',creatorId:'u'};
+ await assert.rejects(provisionBitable(args),/manual review/);
+ const saved=await f.journal.load('w');assert.equal(saved.baseToken,'base');assert.equal(saved.tableId,'tbl');assert.ok(saved.fields.name);assert.equal(saved.pending,'field:项目名称');
+ await assert.rejects(provisionBitable(args),/manual review/);assert.equal(n,3);
+});
