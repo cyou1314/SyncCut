@@ -1,8 +1,50 @@
 import Foundation
 import XCTest
+import CryptoKit
 @testable import SyncCutAgent
 
 final class LocalImportServiceTests: XCTestCase {
+    func testCloudAssetCacheVerifiesChecksumAndReusesContentAddressedFile() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("SyncCutCloudCache-" + UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let cacheDirectory = root.appendingPathComponent("CloudAssets", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+
+        let bytes = Data("audio".utf8)
+        let sourceA = root.appendingPathComponent("source-a.wav")
+        try bytes.write(to: sourceA)
+        let digest = SHA256.hash(data: bytes).map { String(format: "%02x", $0) }.joined()
+        let asset = AgentJobAsset(
+            assetVersionId: "version-1",
+            assetId: "asset-1",
+            version: 1,
+            name: "Rain",
+            kind: "sfx",
+            filename: "rain.wav",
+            mimeType: "audio/wav",
+            sizeBytes: Int64(bytes.count),
+            sha256: digest,
+            downloadUrl: URL(string: "https://s3.example.test/signed")!
+        )
+        let cache = CloudAssetCache(directory: cacheDirectory)
+        let first = try cache.cache(asset, downloadedURL: sourceA)
+        XCTAssertFalse(first.reusedExistingFile)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: cacheDirectory.appendingPathComponent(first.cachedAsset.relativePath).path))
+        XCTAssertEqual(try cache.cachedAssets().count, 1)
+
+        let sourceB = root.appendingPathComponent("source-b.wav")
+        try bytes.write(to: sourceB)
+        let second = try cache.cache(asset, downloadedURL: sourceB)
+        XCTAssertTrue(second.reusedExistingFile)
+        XCTAssertEqual(try cache.cachedAssets().count, 1)
+
+        let badSource = root.appendingPathComponent("bad.wav")
+        try Data("wrong".utf8).write(to: badSource)
+        XCTAssertThrowsError(try cache.cache(asset, downloadedURL: badSource))
+        XCTAssertEqual(try cache.cachedAssets().count, 1)
+    }
+
     func testArchiveRestoreAndVersionHistoryAreNonDestructive() throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("SyncCutTests-" + UUID().uuidString, isDirectory: true)

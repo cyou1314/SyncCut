@@ -31,6 +31,7 @@ final class AgentViewModel: ObservableObject {
     @Published var cloudDevice: DeviceIdentity?
     @Published var cloudMessage = ""
     @Published var isPairing = false
+    @Published var isRunningCloudJob = false
     @Published var tableURL: URL?
     @Published var audioURL: URL?
     @Published var libraryURL: URL?
@@ -400,6 +401,34 @@ final class AgentViewModel: ObservableObject {
         }
     }
 
+    func runNextCloudJob() {
+        guard !isRunningCloudJob else { return }
+        let server = cloudOrigin.trimmingCharacters(in: .whitespacesAndNewlines)
+        isRunningCloudJob = true
+        cloudMessage = "正在检查云端素材任务…"
+        Task {
+            defer { isRunningCloudJob = false }
+            do {
+                guard let token = try deviceTokenStore.load() else {
+                    throw NSError(domain: "SyncCut.AgentJob", code: 2, userInfo: [
+                        NSLocalizedDescriptionKey: "设备凭证不存在，请重新配对。"
+                    ])
+                }
+                let cloudDirectory = URL(fileURLWithPath: cachePath, isDirectory: true)
+                    .appendingPathComponent("CloudAssets", isDirectory: true)
+                let cache = CloudAssetCache(directory: cloudDirectory)
+                let runner = AgentJobRunner(service: devicePairingService, cache: cache)
+                guard let result = try await runner.runNext(server: server, token: token) else {
+                    cloudMessage = "目前没有待处理的云端素材任务。"
+                    return
+                }
+                cloudMessage = "任务完成：\\(result.assetCount) 个素材已下载并通过 SHA-256 校验；\\(result.reusedCount) 个文件复用了本地缓存。素材已放入 CloudAssets，剪映导入将在下一阶段接入。"
+            } catch {
+                cloudMessage = error.localizedDescription
+            }
+        }
+    }
+
     func disconnectCloudDevice() {
         Task {
             var remoteRevoked = false
@@ -555,6 +584,17 @@ struct AgentMenuView: View {
                     .font(.system(size: 10, design: .monospaced))
                     .foregroundStyle(.secondary)
                     .textSelection(.enabled)
+                Button {
+                    model.runNextCloudJob()
+                } label: {
+                    if model.isRunningCloudJob {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Label("检查并执行云端素材任务", systemImage: "arrow.down.circle")
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(model.isRunningCloudJob)
                 Button("解除本机配对") { model.disconnectCloudDevice() }
                     .buttonStyle(.bordered)
             } else {
