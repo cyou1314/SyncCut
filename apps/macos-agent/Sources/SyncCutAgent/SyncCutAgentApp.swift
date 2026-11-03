@@ -268,7 +268,7 @@ final class AgentViewModel: ObservableObject {
                 )
                 UserDefaults.standard.set(bookmark, forKey: libraryBookmarkKey)
             } catch {
-                errors = ["无法保存素材库访问权限：\\(error.localizedDescription)"]
+                errors = ["无法保存素材库访问权限：\(error.localizedDescription)"]
             }
             refreshLibrary()
         }
