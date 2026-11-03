@@ -86,3 +86,14 @@ GitHub Actions 会在 macOS runner 上执行构建和 Swift 单元测试；API �
 设备 Token 仅在配对响应中返回一次，并保存到 macOS 钥匙串；不写入 UserDefaults、素材清单或日志。设备可在 Web 控制台单独撤销。开发环境允许使用 http://127.0.0.1 / localhost；远程服务器必须使用 HTTPS。
 
 当前 M2.3 已完成配对、设备身份查询、心跳和撤销 API；任务拉取、签名下载与 Mac 执行结果回传仍在开发中。
+## 云端设备配对与自动素材同步（M2.3）
+
+1. 在 SyncCut Web 控制台「Mac 设备」区域生成一次性配对码（10 分钟有效）。
+2. 在 Mac 助手「设备」页面填写云端 API HTTPS 地址和配对码。
+3. 配对成功后，设备凭证保存在 macOS 钥匙串；控制台可单独撤销设备。
+4. Web 控制台「发送素材到 Mac」区域选择已归档到对象存储的素材版本和目标设备。
+5. Mac 助手配对后每 10 秒自动轮询任务，下载签名 URL，校验文件大小与 SHA-256，并写入 Application Support/SyncCut/Cache/CloudAssets。
+
+CloudAssets/manifest.json 记录素材版本、原始文件名、大小、哈希和缓存相对路径。相同 SHA-256 的文件复用物理缓存文件。
+
+当前 sync_assets 任务只负责云端到 Mac 的下载、校验和缓存，不会声称已经导入剪映。剪映素材库批量导入属于 M2.4。
