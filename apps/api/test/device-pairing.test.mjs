@@ -51,6 +51,7 @@ test("Mac device pairing is one-time, tenant-scoped, and revocable", {
       appSecret: "test-secret",
       encryptionKey: randomBytes(32).toString("base64"),
       publicOrigin: origin,
+      objectStore: { presignGet: (key) => `https://s3.example.test/${key}?signed=1` },
     });
     server = createServer((req, res) => {
       route(req, res, new URL(req.url, origin)).catch(() => {
@@ -130,6 +131,52 @@ test("Mac device pairing is one-time, tenant-scoped, and revocable", {
     assert.equal(listed.devices.length, 1);
     assert.equal(listed.devices[0].id, paired.deviceId);
     assert.equal(Object.hasOwn(listed.devices[0], "device_token_hash"), false);
+
+    const connection = (await pool.query(`insert into feishu_connections
+      (tenant_id,app_mode,token_mode,app_id,app_token,table_id,field_mapping,webhook_secret_hash,connected_by_member_id)
+      values ($1,'custom_app','user_access_token','cli_device_test','base_device','tbl_device','{}'::jsonb,$2,$3)
+      returning id`,[tenant,"f".repeat(64),member])).rows[0].id;
+    const asset = (await pool.query(`insert into media_assets (tenant_id,connection_id,record_id,name,kind)
+      values ($1,$2,'rec_audio','Rain ambience','sfx') returning id`,[tenant,connection])).rows[0].id;
+    const version = (await pool.query(`insert into asset_versions
+      (tenant_id,asset_id,version_number,file_token,original_filename,mime_type,size_bytes,sha256,storage_key,stored_at)
+      values ($1,$2,1,'file_audio','rain.wav','audio/wav',5,$3,'tenants/test/assets/rain/v1/rain.wav',now()) returning id`,
+      [tenant,asset,createHash("sha256").update("audio").digest("hex")])).rows[0].id;
+
+    response = await fetch(root + `/api/console/devices/${paired.deviceId}/jobs`, {
+      method: "POST",
+      headers: { cookie, origin, "content-type": "application/json" },
+      body: JSON.stringify({ job_type: "import_media", asset_version_ids: [version], idempotency_key: "device-import-1" }),
+    });
+    assert.equal(response.status, 202);
+    const createdJob = await response.json();
+    assert.equal(createdJob.created, true);
+
+    response = await fetch(root + "/api/agent/jobs/next", {
+      headers: { authorization: `Bearer ${paired.deviceToken}` },
+    });
+    assert.equal(response.status, 200);
+    const leased = await response.json();
+    assert.equal(leased.job.id, createdJob.jobId);
+    assert.equal(leased.job.jobType, "import_media");
+    assert.equal(leased.job.assets.length, 1);
+    assert.equal(leased.job.assets[0].assetVersionId, version);
+    assert.equal(leased.job.assets[0].sha256, createHash("sha256").update("audio").digest("hex"));
+    assert.match(leased.job.assets[0].downloadUrl, /^https:\/\/s3\.example\.test\//);
+
+    response = await fetch(root + `/api/agent/jobs/${createdJob.jobId}/heartbeat`, {
+      method: "POST", headers: { authorization: `Bearer ${paired.deviceToken}`, "content-type": "application/json" }, body: "{}",
+    });
+    assert.equal(response.status, 200);
+    response = await fetch(root + `/api/agent/jobs/${createdJob.jobId}/complete`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${paired.deviceToken}`, "content-type": "application/json" },
+      body: JSON.stringify({ result: { imported: 1, verified: true } }),
+    });
+    assert.equal(response.status, 200);
+    const completedJob = (await pool.query("select status,result from sync_jobs where id=$1",[createdJob.jobId])).rows[0];
+    assert.equal(completedJob.status,"succeeded");
+    assert.equal(completedJob.result.imported,1);
 
     response = await fetch(root + `/api/console/devices/${paired.deviceId}/revoke`, {
       method: "POST", headers: { cookie, origin, "content-type": "application/json" }, body: "{}",
