@@ -139,7 +139,7 @@ test("webhook inbox handoff is atomic: enqueue failure leaves events queued, suc
     const worker = createSyncWorker({ pool, queue: realQueue, objectStore, makeClient: () => ({}), compensationMinutes: 0 });
     const handedOff = await worker.consumeInbox();
     assert.equal(handedOff.enqueued, 1);
-    event = (await pool.query("select status,job_id,attempts from feishu_event_inbox where connection_id=$1", [connection])).rows[0];
+    event = (await pool.query("select id,status,job_id,attempts from feishu_event_inbox where connection_id=$1", [connection])).rows[0];
     assert.equal(event.status, "enqueued");
     assert.ok(event.job_id);
     assert.equal(event.attempts, 1);
