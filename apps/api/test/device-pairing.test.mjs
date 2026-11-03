@@ -151,6 +151,17 @@ test("Mac device pairing is one-time, tenant-scoped, and revocable", {
     assert.equal(availableAssets.assets[0].ready, true);
     assert.equal(availableAssets.assets[0].episode_label ?? null, null);
 
+    const oversizedVersion = (await pool.query(`insert into asset_versions
+      (tenant_id,asset_id,version_number,file_token,original_filename,mime_type,size_bytes,sha256,storage_key,stored_at)
+      values ($1,$2,2,'file_large','large.wav','audio/wav',2147483649,$3,'tenants/test/assets/rain/v2/large.wav',now()) returning id`,
+      [tenant,asset,createHash("sha256").update("large").digest("hex")])).rows[0].id;
+    response = await fetch(root + `/api/console/devices/${paired.deviceId}/jobs`, {
+      method: "POST",
+      headers: { cookie, origin, "content-type": "application/json" },
+      body: JSON.stringify({ job_type: "sync_assets", asset_version_ids: [oversizedVersion] }),
+    });
+    assert.equal(response.status, 413, "oversized batches must be rejected before task creation");
+
     const secondCodeResponse = await fetch(root + "/api/console/devices/pairing-code", {
       method: "POST", headers: { cookie, origin, "content-type": "application/json" }, body: "{}",
     });
