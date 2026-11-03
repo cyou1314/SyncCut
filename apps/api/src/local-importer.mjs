@@ -96,7 +96,7 @@ export async function applyImportPlan({plan,libraryDirectory,manifestPath,confir
   const dest=path.join(dir,filename),tmp=dest+'.'+randomUUID()+'.partial';
   try{await copyFile(item.filePath,tmp);if(await hashFile(tmp)!==item.sha256)throw Error('Copied file hash mismatch');await rename(tmp,dest)}
   catch(error){await rm(tmp,{force:true});throw error}
-  byId.set(item.sourceId,{sourceId:item.sourceId,sourceIdIsDerived:item.sourceIdIsDerived,metadata,versions:[...(old?.versions??[]),{version,filename,diskPath:dest,sizeBytes:item.sizeBytes,sha256:item.sha256,importedAt:new Date().toISOString()}]});
+  byId.set(item.sourceId,{sourceId:item.sourceId,sourceIdIsDerived:item.sourceIdIsDerived,metadata,versions:[...(old?.versions??[]),{version,filename,diskPath:dest,sizeBytes:item.sizeBytes,sha256:item.sha256,importedAt:new Date().toISOString()}],archivedAt:old?.archivedAt});
   changes.push({sourceId:item.sourceId,action:old?'updated':'added',version});
  }
  const next={version:1,assets:[...byId.values()],updatedAt:new Date().toISOString()};

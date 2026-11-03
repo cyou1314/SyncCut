@@ -24,3 +24,23 @@ test('metadata changes update the manifest without creating an audio version',as
   assert.equal(saved.assets[0].versions.length,1);
  }finally{await rm(d,{recursive:true,force:true})}
 });
+
+test('new audio versions preserve archived state',async()=>{
+ const d=await mkdtemp(path.join(os.tmpdir(),'sc-archive-'));
+ try{
+  const audio=path.join(d,'rain.wav'),csvPath=path.join(d,'assets.csv'),library=path.join(d,'library'),manifestPath=path.join(library,'manifest.json');
+  await writeFile(audio,'v1');await writeFile(csvPath,csv);
+  let plan=await previewCsvImport({csvPath,audioDirectory:d});
+  await applyImportPlan({plan,libraryDirectory:library,manifestPath,confirm:true});
+  const archivedAt='2026-11-03T00:00:00.000Z';
+  const manifest=JSON.parse(await readFile(manifestPath,'utf8'));
+  manifest.assets[0].archivedAt=archivedAt;
+  await writeFile(manifestPath,JSON.stringify(manifest,null,2));
+  await writeFile(audio,'v2');
+  plan=await previewCsvImport({csvPath,audioDirectory:d,existing:manifest.assets});
+  await applyImportPlan({plan,libraryDirectory:library,manifestPath,confirm:true});
+  const saved=JSON.parse(await readFile(manifestPath,'utf8'));
+  assert.equal(saved.assets[0].archivedAt,archivedAt);
+  assert.equal(saved.assets[0].versions.length,2);
+ }finally{await rm(d,{recursive:true,force:true})}
+});
