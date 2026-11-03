@@ -18,27 +18,37 @@ test('CLI rejects unknown and duplicate arguments',()=>{
 });
 
 import {mkdtemp,mkdir,writeFile,readFile,access,rm} from 'node:fs/promises';
-import {Readable,Writable} from 'node:stream';
+import {spawn} from 'node:child_process';
+import {once} from 'node:events';
+import {fileURLToPath} from 'node:url';
 import os from 'node:os';
 import path from 'node:path';
-import {runImportCli} from '../bin/import-media.mjs';
 
-function outputCapture(){let value='';const stream=new Writable({write(chunk,encoding,callback){value+=chunk.toString();callback()}});return {stream,get value(){return value}}}
+const cliPath=fileURLToPath(new URL('../bin/import-media.mjs',import.meta.url));
+async function runProcess(args,input){
+ const child=spawn(process.execPath,[cliPath,...args],{stdio:['pipe','pipe','pipe']});
+ let stdout='',stderr='';
+ child.stdout.setEncoding('utf8').on('data',chunk=>stdout+=chunk);
+ child.stderr.setEncoding('utf8').on('data',chunk=>stderr+=chunk);
+ child.stdin.end(input);
+ const [code]=await once(child,'close');
+ return {code,stdout,stderr};
+}
 test('CLI cancellation leaves library untouched; explicit IMPORT creates a manifest',async()=>{
  const root=await mkdtemp(path.join(os.tmpdir(),'sc-cli-run-'));
  try{
   const table=path.join(root,'assets.csv'),audio=path.join(root,'audio'),library=path.join(root,'library');
   await mkdir(audio);await writeFile(path.join(audio,'rain.wav'),'audio-data');
-  await writeFile(table,'素材名称,素材类型,音频附件,项目名称,集数\n雨声,音效,rain.wav,雁回关,EP015\n');
+  await writeFile(table,'素材名称,素材类型,音频附件,项目名称,集数\\n雨声,音效,rain.wav,雁回关,EP015\\n');
   const argv=['--table',table,'--audio-dir',audio,'--library',library];
-  const cancelled=outputCapture();
-  assert.equal(await runImportCli({argv,input:Readable.from(['cancel\n']),output:cancelled.stream}),0);
+  const cancelled=await runProcess(argv,'cancel\\n');
+  assert.equal(cancelled.code,0,cancelled.stdout+cancelled.stderr);
   await assert.rejects(access(path.join(library,'manifest.json')));
-  const confirmed=outputCapture();
-  assert.equal(await runImportCli({argv,input:Readable.from(['IMPORT\n']),output:confirmed.stream}),0);
+  const confirmed=await runProcess(argv,'IMPORT\\n');
+  assert.equal(confirmed.code,0,confirmed.stdout+confirmed.stderr);
   const manifest=JSON.parse(await readFile(path.join(library,'manifest.json'),'utf8'));
   assert.equal(manifest.assets.length,1);
   assert.equal(manifest.assets[0].metadata.name,'雨声');
-  assert.match(confirmed.value,/导入完成/);
+  assert.match(confirmed.stdout,/导入完成/);
  }finally{await rm(root,{recursive:true,force:true})}
 });
