@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { createInterface } from 'node:readline/promises';
 import { previewImport, applyImportPlan, cleanupImportPreview } from '../src/local-importer.mjs';
 
@@ -96,7 +97,7 @@ export async function runImportCli({ argv = process.argv.slice(2), input = proce
     });
     output.write('\n导入完成\n');
     output.write(`素材条目：${result.assetCount}\n`);
-    output.write(`新增/更新/未变更：${result.changes.filter(x => x.action === 'added' || x.action === 'updated').length}/${result.changes.filter(x => x.action === 'metadata_updated').length}/${result.changes.filter(x => x.action === 'unchanged').length}\n`);
+    output.write(`新增/更新/未变更：${result.changes.filter(x => x.action === 'added' || x.action === 'updated').length}/${result.changes.filter(x => x.metadataUpdated).length}/${result.changes.filter(x => x.action === 'unchanged').length}\n`);
     output.write(`清单：${result.manifestPath}\n`);
     return 0;
   } catch (error) {
@@ -107,6 +108,6 @@ export async function runImportCli({ argv = process.argv.slice(2), input = proce
   }
 }
 
-if (import.meta.url === new URL(process.argv[1], 'file:').href) {
+if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
   process.exitCode = await runImportCli();
 }
