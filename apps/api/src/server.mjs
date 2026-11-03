@@ -5,6 +5,7 @@ import { createConsoleRoutes } from "./console-routes.mjs";
 import { Pool } from "pg";
 import { loadConfig } from "./config.mjs";
 import { acceptBitableWebhook } from "./bitable-webhook.mjs";
+import { createObjectStore } from "./object-store.mjs";
 
 const config = loadConfig();
 if (!config.databaseUrl) {
@@ -18,7 +19,15 @@ const pool = new Pool({
 });
 
 const consoleEnabled = !!(process.env.FEISHU_APP_ID && process.env.FEISHU_APP_SECRET && process.env.SYNC_CREDENTIAL_ENCRYPTION_KEY && process.env.PUBLIC_ORIGIN);
-const consoleRoutes = consoleEnabled ? createConsoleRoutes({pool,appId:process.env.FEISHU_APP_ID,appSecret:process.env.FEISHU_APP_SECRET,encryptionKey:process.env.SYNC_CREDENTIAL_ENCRYPTION_KEY,publicOrigin:process.env.PUBLIC_ORIGIN,appMode:process.env.FEISHU_APP_MODE ?? 'custom_app'}) : null;
+const objectStoreConfigured = !!(process.env.S3_ENDPOINT && process.env.S3_BUCKET && process.env.S3_ACCESS_KEY_ID && process.env.S3_SECRET_ACCESS_KEY);
+const objectStore = objectStoreConfigured ? createObjectStore({
+  endpoint: process.env.S3_ENDPOINT,
+  bucket: process.env.S3_BUCKET,
+  accessKeyId: process.env.S3_ACCESS_KEY_ID,
+  secretAccessKey: process.env.S3_SECRET_ACCESS_KEY,
+  region: process.env.S3_REGION ?? 'us-east-1',
+}) : null;
+const consoleRoutes = consoleEnabled ? createConsoleRoutes({pool,appId:process.env.FEISHU_APP_ID,appSecret:process.env.FEISHU_APP_SECRET,encryptionKey:process.env.SYNC_CREDENTIAL_ENCRYPTION_KEY,publicOrigin:process.env.PUBLIC_ORIGIN,appMode:process.env.FEISHU_APP_MODE ?? 'custom_app',objectStore}) : null;
 
 function sendJson(response, status, body, requestId) {
   response.writeHead(status, {
