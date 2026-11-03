@@ -8,6 +8,6 @@ test("Feishu console inline JavaScript parses", async () => {
   const scripts = [...html.matchAll(/<script(?:\s[^>]*)?>([\s\S]*?)<\/script>/gi)].map((match) => match[1]);
   assert.ok(scripts.length > 0, "console page should contain an inline script");
   scripts.forEach((source, index) => {
-    assert.doesNotThrow(() => new Script(source, { filename: \`feishu.html:inline-\${index + 1}\` }));
+    assert.doesNotThrow(() => new Script(source, { filename: "feishu.html:inline-" + (index + 1) }));
   });
 });
