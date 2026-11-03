@@ -130,7 +130,7 @@ export function createConsoleRoutes({pool,appId,appSecret,encryptionKey,publicOr
         if(!device) return send(res,401,{error:'device_unauthorized'}),true;
         if(!objectStore) return send(res,503,{error:'object_storage_unavailable'}),true;
         const deviceQueue=createTaskQueue(pool,{workerId:`device:${device.id}`});
-        const job=await deviceQueue.leaseNext({jobTypes:['import_media','apply_timeline'],tenantId:device.tenant_id,deviceId:device.id,leaseSeconds:120});
+        const job=await deviceQueue.leaseNext({jobTypes:['sync_assets'],tenantId:device.tenant_id,deviceId:device.id,leaseSeconds:120});
         if(!job) return send(res,200,{job:null}),true;
         try {
           await deviceQueue.begin(job.id,{leaseSeconds:120});
@@ -219,7 +219,7 @@ export function createConsoleRoutes({pool,appId,appSecret,encryptionKey,publicOr
       if(req.method==='POST' && createDeviceJobMatch) {
         if(!['owner','admin','editor'].includes(actor.role)) return send(res,403,{error:'insufficient_role'}),true;
         const body=await readJsonBody(req);
-        if(body.job_type!=='import_media') return send(res,400,{error:'unsupported_job_type'}),true;
+        if(body.job_type!=='sync_assets') return send(res,400,{error:'unsupported_job_type'}),true;
         const ids=Array.isArray(body.asset_version_ids)?[...new Set(body.asset_version_ids)]:[];
         if(!ids.length || ids.length>100 || ids.some(id=>typeof id!=='string'||! /^[0-9a-f-]{36}$/i.test(id))) return send(res,400,{error:'invalid_asset_version_ids'}),true;
         const device=(await pool.query(`select id from sync_devices where id=$1 and tenant_id=$2 and status='active'`,[createDeviceJobMatch[1],actor.tenant_id])).rows[0];
@@ -233,7 +233,7 @@ export function createConsoleRoutes({pool,appId,appSecret,encryptionKey,publicOr
         const byId=new Map(versions.rows.map(v=>[v.id,v]));
         const snapshots=ids.map(id=>{const v=byId.get(id);return {assetVersionId:v.id,assetId:v.asset_id,version:v.version_number,name:v.name,kind:v.kind,filename:v.original_filename,mimeType:v.mime_type,sizeBytes:Number(v.size_bytes),sha256:v.sha256,timelineParameters:v.timeline_parameters??{}};});
         const idempotencyKey=typeof body.idempotency_key==='string'&&body.idempotency_key.length>0&&body.idempotency_key.length<=128?body.idempotency_key:randomUUID();
-        const queued=await enqueueQueue.enqueue({tenantId:actor.tenant_id,connectionId:conn.id,deviceId:device.id,jobType:'import_media',idempotencyKey,payload:{assetVersionIds:ids,assets:snapshots}});
+        const queued=await enqueueQueue.enqueue({tenantId:actor.tenant_id,connectionId:conn.id,deviceId:device.id,jobType:'sync_assets',idempotencyKey,payload:{assetVersionIds:ids,assets:snapshots}});
         return send(res,202,{jobId:queued.id,status:queued.status,created:queued.created}),true;
       }
       if(req.method==='POST' && url.pathname==='/api/console/devices/pairing-code') {
