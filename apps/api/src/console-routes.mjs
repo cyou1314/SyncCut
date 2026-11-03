@@ -218,7 +218,7 @@ export function createConsoleRoutes({pool,appId,appSecret,encryptionKey,publicOr
       if(req.method==='GET' && url.pathname==='/api/console/assets') {
         if(!['owner','admin','editor'].includes(actor.role)) return send(res,403,{error:'insufficient_role'}),true;
         const conn=await connection(actor);if(!conn)return send(res,409,{error:'no_connection'}),true;
-        const assets=await pool.query(`select a.id as asset_id,a.name,a.kind,a.project_name,a.episode,a.scene,a.shot,
+        const assets=await pool.query(`select a.id as asset_id,a.name,a.kind,a.project_name,a.episode_label,a.scene_name,a.shot_id,
           v.id as asset_version_id,v.version_number,v.original_filename,v.mime_type,v.size_bytes,v.sha256,v.storage_key,v.created_at
           from media_assets a
           join lateral (
@@ -227,7 +227,7 @@ export function createConsoleRoutes({pool,appId,appSecret,encryptionKey,publicOr
           ) v on true
           where a.tenant_id=$1 and a.connection_id=$2
           order by a.name asc`,[actor.tenant_id,conn.id]);
-        return send(res,200,{assets:assets.rows.map(v=>({...v,size_bytes:Number(v.size_bytes),ready:!!(v.storage_key&&v.sha256)}))}),true;
+        return send(res,200,{assets:assets.rows.map(v=>({...v,size_bytes:Number(v.size_bytes),ready:!!(v.storage_key&&v.sha256&&v.size_bytes!=null)}))}),true;
       }
       const createDeviceJobMatch=url.pathname.match(/^\/api\/console\/devices\/([0-9a-f-]{36})\/jobs$/i);
       if(req.method==='POST' && createDeviceJobMatch) {
@@ -243,7 +243,7 @@ export function createConsoleRoutes({pool,appId,appSecret,encryptionKey,publicOr
           from asset_versions v join media_assets a on a.id=v.asset_id and a.tenant_id=v.tenant_id
           where v.id=any($1::uuid[]) and v.tenant_id=$2 and a.connection_id=$3`,[ids,actor.tenant_id,conn.id]);
         if(versions.rowCount!==ids.length) return send(res,404,{error:'asset_version_not_found'}),true;
-        if(versions.rows.some(v=>!v.storage_key||!v.sha256)) return send(res,409,{error:'asset_version_not_archived'}),true;
+        if(versions.rows.some(v=>!v.storage_key||!v.sha256||v.size_bytes==null)) return send(res,409,{error:'asset_version_not_archived'}),true;
         const byId=new Map(versions.rows.map(v=>[v.id,v]));
         const snapshots=ids.map(id=>{const v=byId.get(id);return {assetVersionId:v.id,assetId:v.asset_id,version:v.version_number,name:v.name,kind:v.kind,filename:v.original_filename,mimeType:v.mime_type,sizeBytes:Number(v.size_bytes),sha256:v.sha256,timelineParameters:v.timeline_parameters??{}};});
         const idempotencyKey=typeof body.idempotency_key==='string'&&body.idempotency_key.length>0&&body.idempotency_key.length<=128?body.idempotency_key:randomUUID();
