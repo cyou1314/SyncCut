@@ -34,3 +34,10 @@
 ## 当前验收边界
 
 代码骨架和单元测试不等于真实飞书联调。只有在用户自己的飞书租户、Base、权限和 Mac/剪映版本上完成验证，才可将相应项目标记为通过。
+
+## M2.2 运维与安全补强
+
+- [ ] Webhook 密钥创建时一次性展示、短期加密暂存、过期和轮换 UI（M2.2 hardening）。
+- [ ] Webhook inbox 到 sync job 的原子交接，避免 Worker 在 processing 状态崩溃后遗留事件。
+- [ ] Worker lease fencing，防止过期 Worker 继续完成或覆盖任务。
+- [ ] 上述补强需在真实部署环境迁移并验收后勾选。
