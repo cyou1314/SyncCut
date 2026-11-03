@@ -24,8 +24,17 @@ export function createObjectStore({ endpoint, bucket, accessKeyId, secretAccessK
     throw new Error("Object store endpoint, bucket and credentials are required");
   }
   const base = new URL(endpoint);
+  const loopback = ["localhost", "127.0.0.1", "::1"].includes(base.hostname);
+  if ((base.protocol !== "https:" && !(base.protocol === "http:" && loopback)) || base.username || base.password || base.search || base.hash) {
+    throw new Error("Object store endpoint must use HTTPS (HTTP is allowed only for loopback development endpoints).");
+  }
   const host = base.host;
-  const pathFor = (key) => `${base.pathname.replace(/\/$/, "")}/${bucket}/${encodeKey(key)}`;
+  const pathFor = (key) => {
+    if (typeof key !== "string" || !key || key.length > 1024 || key.startsWith("/") || key.split("/").some(part => part === "." || part === "..") || /[\u0000-\u001f\u007f]/.test(key)) {
+      throw new TypeError("Object key is invalid.");
+    }
+    return base.pathname.replace(/\/$/, "") + "/" + bucket + "/" + encodeKey(key);
+  };
 
   function canonical({ method, key, now, extraHeaders = {}, payloadHash, query = "" }) {
     const amzDate = now.toISOString().replace(/[-:]/g, "").replace(/\.\d{3}/, "");
@@ -72,6 +81,9 @@ export function createObjectStore({ endpoint, bucket, accessKeyId, secretAccessK
     // Short-lived signed URL so a Mac agent can download without holding
     // store credentials (architecture: 短期下载签名 URL).
     presignGet(key, { ttlSeconds = 900 } = {}) {
+      if (!Number.isInteger(ttlSeconds) || ttlSeconds < 1 || ttlSeconds > 604800) {
+        throw new RangeError("ttlSeconds must be an integer between 1 and 604800.");
+      }
       const now = new Date();
       const amzDate = now.toISOString().replace(/[-:]/g, "").replace(/\.\d{3}/, "");
       const dateStamp = amzDate.slice(0, 8);
