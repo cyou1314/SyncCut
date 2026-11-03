@@ -88,7 +88,7 @@ enum LocalImportError: LocalizedError {
         case .invalidManifest: return "现有素材清单格式无法识别，未修改任何文件。"
         case .unresolvedRows: return "存在未解决的表格错误，不能导入。"
         case .sourceChanged(let name): return "素材在预览后发生变化：\(name)。请重新预览。"
-        case .assetNotFound(let id): return "素材不存在或已被移除：\\(id)"
+        case .assetNotFound(let id): return "素材不存在或已被移除：\(id)"
         }
     }
 }
