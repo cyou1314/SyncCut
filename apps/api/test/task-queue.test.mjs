@@ -55,6 +55,15 @@ test("task queue: idempotent enqueue, lease, heartbeat, succeed", { skip: !proce
     const row = (await pool.query("select status, result from sync_jobs where id = $1", [job.id])).rows[0];
     assert.equal(row.status, "succeeded");
     assert.equal(row.result.imported, 2);
+
+    const partial = await queue.enqueue({ tenantId: tenant, jobType: "full_sync", idempotencyKey: "k-partial" });
+    const partialJob = await queue.leaseNext({ jobTypes: ["full_sync"] });
+    assert.equal(partialJob.id, partial.id);
+    await queue.begin(partialJob.id);
+    await queue.succeed(partialJob.id, { imported: 1, failedRecords: 1 }, { status: "partial" });
+    const partialRow = (await pool.query("select status,result from sync_jobs where id=$1", [partial.id])).rows[0];
+    assert.equal(partialRow.status, "partial");
+    assert.equal(partialRow.result.failedRecords, 1);
   } finally {
     await pool.end();
     await admin.query(`drop schema "${schema}" cascade`);
