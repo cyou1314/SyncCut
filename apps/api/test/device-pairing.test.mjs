@@ -128,7 +128,7 @@ test("Mac device pairing is one-time, tenant-scoped, and revocable", {
     response = await fetch(root + "/api/console/devices", { headers: { cookie } });
     assert.equal(response.status, 200);
     const listed = await response.json();
-    assert.equal(listed.devices.length, 1);
+    assert.equal(listed.devices.length, 2);
     assert.equal(listed.devices[0].id, paired.deviceId);
     assert.equal(Object.hasOwn(listed.devices[0], "device_token_hash"), false);
 
@@ -143,6 +143,26 @@ test("Mac device pairing is one-time, tenant-scoped, and revocable", {
       values ($1,$2,1,'file_audio','rain.wav','audio/wav',5,$3,'tenants/test/assets/rain/v1/rain.wav',now()) returning id`,
       [tenant,asset,createHash("sha256").update("audio").digest("hex")])).rows[0].id;
 
+    response = await fetch(root + "/api/console/assets", { headers: { cookie } });
+    assert.equal(response.status, 200);
+    const availableAssets = await response.json();
+    assert.equal(availableAssets.assets.length, 1);
+    assert.equal(availableAssets.assets[0].asset_version_id, version);
+    assert.equal(availableAssets.assets[0].ready, true);
+    assert.equal(availableAssets.assets[0].episode_label ?? null, null);
+
+    const secondCodeResponse = await fetch(root + "/api/console/devices/pairing-code", {
+      method: "POST", headers: { cookie, origin, "content-type": "application/json" }, body: "{}",
+    });
+    assert.equal(secondCodeResponse.status, 201);
+    const secondCode = await secondCodeResponse.json();
+    const secondPairResponse = await fetch(root + "/api/agent/pair", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ code: secondCode.code, device_name: "Second Mac", app_version: "0.3.0", macos_version: "15.1" }),
+    });
+    assert.equal(secondPairResponse.status, 201);
+    const secondDevice = await secondPairResponse.json();
+
     response = await fetch(root + `/api/console/devices/${paired.deviceId}/jobs`, {
       method: "POST",
       headers: { cookie, origin, "content-type": "application/json" },
@@ -151,6 +171,12 @@ test("Mac device pairing is one-time, tenant-scoped, and revocable", {
     assert.equal(response.status, 202);
     const createdJob = await response.json();
     assert.equal(createdJob.created, true);
+
+    response = await fetch(root + "/api/agent/jobs/next", {
+      headers: { authorization: `Bearer ${secondDevice.deviceToken}` },
+    });
+    assert.equal(response.status, 200);
+    assert.equal((await response.json()).job, null, "a different paired Mac must not lease another device's job");
 
     response = await fetch(root + "/api/agent/jobs/next", {
       headers: { authorization: `Bearer ${paired.deviceToken}` },
