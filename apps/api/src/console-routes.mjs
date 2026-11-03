@@ -147,7 +147,7 @@ export function createConsoleRoutes({pool,appId,appSecret,encryptionKey,publicOr
             const byId=new Map(result.rows.map(v=>[v.id,v]));
             for(const id of ids) {
               const v=byId.get(id);
-              assets.push({assetVersionId:v.id,assetId:v.asset_id,version:v.version_number,name:v.name,kind:v.kind,filename:v.original_filename,mimeType:v.mime_type,sizeBytes:Number(v.size_bytes),sha256:v.sha256,timelineParameters:v.timeline_parameters??{},downloadUrl:objectStore.presignGet(v.storage_key,{ttlSeconds:900})});
+              assets.push({assetVersionId:v.id,assetId:v.asset_id,version:v.version_number,name:v.name,kind:v.kind,filename:v.original_filename,mimeType:v.mime_type,sizeBytes:Number(v.size_bytes),sha256:v.sha256,timelineParameters:v.timeline_parameters??{},downloadUrl:objectStore.presignGet(v.storage_key,{ttlSeconds:3600})});
             }
           }
           return send(res,200,{job:{id:job.id,jobType:job.job_type,payload:job.payload,assets,leaseSeconds:120}}),true;
@@ -252,6 +252,8 @@ export function createConsoleRoutes({pool,appId,appSecret,encryptionKey,publicOr
           where v.id=any($1::uuid[]) and v.tenant_id=$2 and a.connection_id=$3`,[ids,actor.tenant_id,conn.id]);
         if(versions.rowCount!==ids.length) return send(res,404,{error:'asset_version_not_found'}),true;
         if(versions.rows.some(v=>!v.storage_key||!v.sha256||v.size_bytes==null)) return send(res,409,{error:'asset_version_not_archived'}),true;
+        const totalBytes=versions.rows.reduce((sum,v)=>sum+BigInt(v.size_bytes),0n);
+        if(totalBytes>2n*1024n*1024n*1024n) return send(res,413,{error:'device_sync_batch_too_large',maxBytes:2147483648}),true;
         const byId=new Map(versions.rows.map(v=>[v.id,v]));
         const snapshots=ids.map(id=>{const v=byId.get(id);return {assetVersionId:v.id,assetId:v.asset_id,version:v.version_number,name:v.name,kind:v.kind,filename:v.original_filename,mimeType:v.mime_type,sizeBytes:Number(v.size_bytes),sha256:v.sha256,timelineParameters:v.timeline_parameters??{}};});
         const idempotencyKey=typeof body.idempotency_key==='string'&&body.idempotency_key.length>0&&body.idempotency_key.length<=128?body.idempotency_key:randomUUID();
