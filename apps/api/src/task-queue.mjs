@@ -118,14 +118,15 @@ export function createTaskQueue(pool, { workerId = `worker-${randomUUID()}` } = 
     if (!updated.rowCount) throw new Error("Job lease lost or expired.");
   }
 
-  async function succeed(jobId, result = {}) {
+  async function succeed(jobId, result = {}, { status = 'succeeded' } = {}) {
+    if (!['succeeded','partial'].includes(status)) throw new Error("Completion status must be succeeded or partial.");
     const updated = await pool.query(
       `update sync_jobs
-          set status = 'succeeded', result = $2::jsonb, error_message = null,
+          set status = $4, result = $2::jsonb, error_message = null,
               finished_at = now(), leased_by = null, lease_expires_at = null, updated_at = now()
         where id = $1 and leased_by = $3 and status = 'running' and lease_expires_at > now()
         returning id`,
-      [jobId, JSON.stringify(result), workerId],
+      [jobId, JSON.stringify(result), workerId, status],
     );
     if (!updated.rowCount) throw new Error("Job lease lost or expired before completion.");
   }

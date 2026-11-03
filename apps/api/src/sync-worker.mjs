@@ -105,10 +105,10 @@ export function createSyncWorker({ pool, queue, objectStore, makeClient, compens
     );
     const failed = await pool.query(
       `update feishu_event_inbox e
-          set status = 'failed', last_error = coalesce(j.error_message, 'Sync job failed')
+          set status = 'failed', last_error = coalesce(j.error_message, case when j.status='partial' then 'Sync job completed with partial record failures' else 'Sync job failed' end)
          from sync_jobs j
         where e.job_id = j.id and e.tenant_id = j.tenant_id
-          and e.status = 'enqueued' and j.status in ('failed','cancelled')`,
+          and e.status = 'enqueued' and j.status in ('failed','cancelled','partial')`,
     );
     return { completed: completed.rowCount, failed: failed.rowCount };
   }
@@ -171,11 +171,12 @@ export function createSyncWorker({ pool, queue, objectStore, makeClient, compens
       if (sync.failed) throw new Error("Connection sync failed; see feishu_sync_runs");
       const archived = await archiveAttachments(connection, client);
       const outcome = { runId: sync.runId, imported: sync.result.imported, duplicates: sync.result.duplicates, failedRecords: sync.result.failed, archived };
-      await queue.succeed(job.id, outcome);
+      const partial = Number(sync.result.failed ?? 0) > 0;
+      await queue.succeed(job.id, outcome, { status: partial ? 'partial' : 'succeeded' });
       await pool.query(
-        `update feishu_event_inbox set status = 'completed', processed_at = now(), last_error = null
+        `update feishu_event_inbox set status = $3, processed_at = now(), last_error = $4
           where job_id = $1 and tenant_id = $2 and status = 'enqueued'`,
-        [job.id, job.tenant_id],
+        [job.id, job.tenant_id, partial ? 'failed' : 'completed', partial ? `partial_sync_failed_records:${sync.result.failed}` : null],
       );
       return outcome;
     } catch (error) {
