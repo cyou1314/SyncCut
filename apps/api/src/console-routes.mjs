@@ -123,6 +123,13 @@ export function createConsoleRoutes({pool,appId,appSecret,encryptionKey,publicOr
           throw error;
         } finally { db.release(); }
       }
+      if(req.method==='POST' && url.pathname==='/api/agent/unpair') {
+        const device=await authenticateDevice(req);
+        if(!device) return send(res,401,{error:'device_unauthorized'}),true;
+        await pool.query(`update sync_devices set status='revoked'
+          where id=$1 and tenant_id=$2 and status='active'`,[device.id,device.tenant_id]);
+        return send(res,200,{revoked:true}),true;
+      }
       if(req.method==='GET' && url.pathname==='/api/agent/me') {
         const device=await authenticateDevice(req);
         if(!device) return send(res,401,{error:'device_unauthorized'}),true;
