@@ -32,6 +32,44 @@ private struct HeartbeatRequest: Encodable {
     let jianyingVersion: String?
 }
 
+struct AgentJobAsset: Decodable {
+    let assetVersionId: String
+    let assetId: String
+    let version: Int
+    let name: String
+    let kind: String
+    let filename: String
+    let mimeType: String?
+    let sizeBytes: Int64
+    let sha256: String
+    let downloadUrl: URL
+}
+
+struct AgentJob: Decodable {
+    let id: String
+    let jobType: String
+    let assets: [AgentJobAsset]
+    let leaseSeconds: Int
+}
+
+struct AgentJobEnvelope: Decodable {
+    let job: AgentJob?
+}
+
+struct AgentJobResult: Encodable {
+    let downloaded: Int
+    let verified: Int
+    let reused: Int
+}
+
+private struct CompleteJobRequest: Encodable {
+    let result: AgentJobResult
+}
+
+private struct FailJobRequest: Encodable {
+    let error: String
+}
+
 private struct PairErrorResponse: Decodable {
     let error: String?
 }
@@ -183,6 +221,63 @@ final class DevicePairingService {
             token: token,
             response: [String: Bool].self
         )
+    }
+
+    func nextJob(server: String, token: String) async throws -> AgentJob? {
+        let envelope: AgentJobEnvelope = try await send(
+            server: server,
+            path: "api/agent/jobs/next",
+            method: "GET",
+            body: Optional<HeartbeatRequest>.none,
+            token: token,
+            response: AgentJobEnvelope.self
+        )
+        return envelope.job
+    }
+
+    func heartbeatJob(server: String, token: String, jobId: String) async throws {
+        let _: [String: Bool] = try await send(
+            server: server,
+            path: "api/agent/jobs/\\(jobId)/heartbeat",
+            method: "POST",
+            body: Optional<HeartbeatRequest>.none,
+            token: token,
+            response: [String: Bool].self
+        )
+    }
+
+    func completeJob(server: String, token: String, jobId: String, result: AgentJobResult) async throws {
+        let _: [String: Bool] = try await send(
+            server: server,
+            path: "api/agent/jobs/\\(jobId)/complete",
+            method: "POST",
+            body: CompleteJobRequest(result: result),
+            token: token,
+            response: [String: Bool].self
+        )
+    }
+
+    func failJob(server: String, token: String, jobId: String, message: String) async throws {
+        let _: [String: Bool] = try await send(
+            server: server,
+            path: "api/agent/jobs/\\(jobId)/fail",
+            method: "POST",
+            body: FailJobRequest(error: String(message.prefix(1000))),
+            token: token,
+            response: [String: Bool].self
+        )
+    }
+
+    func downloadAsset(from url: URL) async throws -> URL {
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.timeoutInterval = 120
+        let (fileURL, response) = try await session.download(for: request)
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+            throw DevicePairingError.httpStatus(status, nil)
+        }
+        return fileURL
     }
 
     private func baseURL(_ raw: String) throws -> URL {
