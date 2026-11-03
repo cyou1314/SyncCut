@@ -43,19 +43,31 @@ struct AssetMetadata: Codable, Equatable {
     var timing: Timing
 }
 
-private struct AssetVersion: Codable {
+struct LibraryAssetVersion: Codable, Identifiable {
     var version: Int
     var filename: String
     var diskPath: String
     var sizeBytes: Int64
     var sha256: String
     var importedAt: String
+    var id: Int { version }
 }
+
+struct LibraryAsset: Identifiable {
+    let sourceID: String
+    let metadata: AssetMetadata
+    let versions: [LibraryAssetVersion]
+    let archivedAt: String?
+    var id: String { sourceID }
+    var isArchived: Bool { archivedAt != nil }
+}
+
 private struct AssetRecord: Codable {
     var sourceId: String
     var sourceIdIsDerived: Bool
     var metadata: AssetMetadata
-    var versions: [AssetVersion]
+    var versions: [LibraryAssetVersion]
+    var archivedAt: String? = nil
 }
 private struct AssetManifest: Codable {
     var version: Int
@@ -68,6 +80,7 @@ enum LocalImportError: LocalizedError {
     case invalidManifest
     case unresolvedRows
     case sourceChanged(String)
+    case assetNotFound(String)
 
     var errorDescription: String? {
         switch self {
@@ -192,7 +205,7 @@ struct LocalImportService {
             guard currentDigest == item.sha256 else { throw LocalImportError.sourceChanged(item.sourceURL.lastPathComponent) }
             if let old, old.versions.last?.sha256 == item.sha256 {
                 records[item.sourceID] = .init(sourceId: old.sourceId, sourceIdIsDerived: old.sourceIdIsDerived,
-                                               metadata: item.metadata, versions: old.versions)
+                                               metadata: item.metadata, versions: old.versions, archivedAt: old.archivedAt)
                 unchanged += 1
                 continue
             }
@@ -218,7 +231,8 @@ struct LocalImportService {
                     version: version, filename: filename, diskPath: destination.path,
                     sizeBytes: item.byteCount, sha256: item.sha256,
                     importedAt: ISO8601DateFormatter().string(from: Date())
-                )]
+                )],
+                archivedAt: old?.archivedAt
             )
             records[item.sourceID] = record
             if old == nil { added += 1 } else { updated += 1 }
@@ -227,9 +241,37 @@ struct LocalImportService {
         manifest.assets = records.values.sorted { $0.sourceId < $1.sourceId }
         manifest.updatedAt = ISO8601DateFormatter().string(from: Date())
         try FileManager.default.createDirectory(at: libraryDirectory, withIntermediateDirectories: true)
-        let data = try JSONEncoder.pretty.encode(manifest)
-        try data.write(to: manifestURL, options: .atomic)
+        try writeManifest(manifest, to: manifestURL)
         return (added, updated, unchanged)
+    }
+
+    func listAssets(manifestURL: URL) throws -> [LibraryAsset] {
+        let manifest = try loadManifest(manifestURL)
+        return manifest.assets.map { record in
+            LibraryAsset(sourceID: record.sourceId, metadata: record.metadata,
+                         versions: record.versions, archivedAt: record.archivedAt)
+        }.sorted {
+            let nameOrder = $0.metadata.name.localizedStandardCompare($1.metadata.name)
+            return nameOrder == .orderedSame ? $0.sourceID < $1.sourceID : nameOrder == .orderedAscending
+        }
+    }
+
+    func setArchived(_ sourceID: String, archived: Bool, manifestURL: URL) throws {
+        var manifest = try loadManifest(manifestURL)
+        guard let index = manifest.assets.firstIndex(where: { $0.sourceId == sourceID }) else {
+            throw LocalImportError.assetNotFound(sourceID)
+        }
+        var record = manifest.assets[index]
+        record.archivedAt = archived ? (record.archivedAt ?? ISO8601DateFormatter().string(from: Date())) : nil
+        manifest.assets[index] = record
+        manifest.updatedAt = ISO8601DateFormatter().string(from: Date())
+        try writeManifest(manifest, to: manifestURL)
+    }
+
+    private func writeManifest(_ manifest: AssetManifest, to url: URL) throws {
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let data = try JSONEncoder.pretty.encode(manifest)
+        try data.write(to: url, options: .atomic)
     }
 
     private func loadManifest(_ url: URL) throws -> AssetManifest {
