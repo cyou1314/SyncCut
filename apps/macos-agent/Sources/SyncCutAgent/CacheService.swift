@@ -12,8 +12,7 @@ struct CachedAsset {
     let byteCount: Int64
 }
 
-/// Safe first building block for the Mac agent.
-/// Network download and Jianying UI automation are intentionally not wired yet.
+/// Local content-addressed cache. Never trusts an existing cache entry without re-hashing it.
 struct CacheService {
     let rootURL: URL
 
@@ -33,19 +32,46 @@ struct CacheService {
             withIntermediateDirectories: true
         )
 
-        let safeName = sourceURL.lastPathComponent
-        let destination = destinationFolder.appendingPathComponent(safeName)
-
-        if !FileManager.default.fileExists(atPath: destination.path) {
-            let partial = destinationFolder.appendingPathComponent(safeName + ".partial")
-            try? FileManager.default.removeItem(at: partial)
-            try FileManager.default.copyItem(at: sourceURL, to: partial)
-            try FileManager.default.moveItem(at: partial, to: destination)
+        let destination = destinationFolder.appendingPathComponent(sourceURL.lastPathComponent)
+        if FileManager.default.fileExists(atPath: destination.path) {
+            let cachedDigest = try Self.sha256(fileURL: destination)
+            if cachedDigest == digest {
+                let attributes = try FileManager.default.attributesOfItem(atPath: destination.path)
+                let size = (attributes[.size] as? NSNumber)?.int64Value ?? 0
+                return CachedAsset(fileURL: destination, sha256: digest, byteCount: size)
+            }
+            try Self.replaceCacheEntry(sourceURL: sourceURL, destinationURL: destination, expectedDigest: digest)
+        } else {
+            try Self.createCacheEntry(sourceURL: sourceURL, destinationURL: destination, expectedDigest: digest)
         }
 
         let attributes = try FileManager.default.attributesOfItem(atPath: destination.path)
         let size = (attributes[.size] as? NSNumber)?.int64Value ?? 0
         return CachedAsset(fileURL: destination, sha256: digest, byteCount: size)
+    }
+
+    private static func createCacheEntry(sourceURL: URL, destinationURL: URL, expectedDigest: String) throws {
+        let partial = destinationURL.deletingLastPathComponent()
+            .appendingPathComponent(destinationURL.lastPathComponent + "." + UUID().uuidString + ".partial")
+        defer { try? FileManager.default.removeItem(at: partial) }
+
+        try FileManager.default.copyItem(at: sourceURL, to: partial)
+        guard try sha256(fileURL: partial) == expectedDigest else {
+            throw CacheServiceError.checksumMismatch
+        }
+        try FileManager.default.moveItem(at: partial, to: destinationURL)
+    }
+
+    private static func replaceCacheEntry(sourceURL: URL, destinationURL: URL, expectedDigest: String) throws {
+        let partial = destinationURL.deletingLastPathComponent()
+            .appendingPathComponent(destinationURL.lastPathComponent + "." + UUID().uuidString + ".partial")
+        defer { try? FileManager.default.removeItem(at: partial) }
+
+        try FileManager.default.copyItem(at: sourceURL, to: partial)
+        guard try sha256(fileURL: partial) == expectedDigest else {
+            throw CacheServiceError.checksumMismatch
+        }
+        _ = try FileManager.default.replaceItemAt(destinationURL, withItemAt: partial)
     }
 
     private static func sha256(fileURL: URL) throws -> String {
