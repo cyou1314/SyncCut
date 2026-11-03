@@ -51,7 +51,7 @@ final class CloudAssetCache {
     private let directory: URL
     private let manifestURL: URL
     private let fileManager: FileManager
-    private let maxAssetBytes: Int64 = 512 * 1024 * 1024
+    static let maxAssetBytes: Int64 = 512 * 1024 * 1024
 
     init(directory: URL, fileManager: FileManager = .default) {
         self.directory = directory
@@ -59,11 +59,17 @@ final class CloudAssetCache {
         self.fileManager = fileManager
     }
 
-    func cache(_ asset: AgentJobAsset, downloadedURL: URL) throws -> CloudAssetCacheResult {
+    func validate(_ asset: AgentJobAsset) throws {
         try validateDownloadURL(asset.downloadUrl)
+        guard asset.sizeBytes >= 0 else { throw CloudAssetCacheError.sizeMismatch(expected: 0, actual: asset.sizeBytes) }
+        guard asset.sizeBytes <= Self.maxAssetBytes else { throw CloudAssetCacheError.assetTooLarge(asset.sizeBytes) }
+    }
+
+    func cache(_ asset: AgentJobAsset, downloadedURL: URL) throws -> CloudAssetCacheResult {
+        try validate(asset)
         let attributes = try fileManager.attributesOfItem(atPath: downloadedURL.path)
         let actualSize = (attributes[.size] as? NSNumber)?.int64Value ?? 0
-        guard actualSize <= maxAssetBytes else { throw CloudAssetCacheError.assetTooLarge(actualSize) }
+        guard actualSize <= Self.maxAssetBytes else { throw CloudAssetCacheError.assetTooLarge(actualSize) }
         guard actualSize == asset.sizeBytes else {
             throw CloudAssetCacheError.sizeMismatch(expected: asset.sizeBytes, actual: actualSize)
         }
@@ -204,6 +210,7 @@ final class AgentJobRunner {
             var downloaded = 0
             var reused = 0
             for asset in job.assets {
+                try cache.validate(asset)
                 let temporary = try await service.downloadAsset(from: asset.downloadUrl)
                 let result = try cache.cache(asset, downloadedURL: temporary)
                 downloaded += 1
