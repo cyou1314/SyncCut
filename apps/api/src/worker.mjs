@@ -46,12 +46,17 @@ const worker = createSyncWorker({
     fetchImpl: fetch,
   }),
   compensationMinutes: Number(process.env.WORKER_COMPENSATION_MINUTES ?? 15),
+  maxAttachmentBytes,
   log: (event, details) => process.stderr.write(`[worker] ${event} ${JSON.stringify(details)}\n`),
 });
 
 const pollMs = Number(process.env.WORKER_POLL_MS ?? 3000);
+const maxAttachmentBytes = Number(process.env.WORKER_MAX_ATTACHMENT_BYTES ?? 256 * 1024 * 1024);
+if (!Number.isInteger(pollMs) || pollMs < 250) throw new Error("WORKER_POLL_MS must be an integer of at least 250.");
+if (!Number.isInteger(maxAttachmentBytes) || maxAttachmentBytes < 1) throw new Error("WORKER_MAX_ATTACHMENT_BYTES must be a positive integer.");
 let stopped = false;
 let compensationTimer = null;
+let compensationInFlight = null;
 
 async function loop() {
   while (!stopped) {
@@ -65,23 +70,28 @@ async function loop() {
 }
 
 async function compensationLoop() {
-  try {
-    await worker.compensationPass();
-  } catch (error) {
-    process.stderr.write(`[worker] compensation failed: ${error.message}\n`);
-  }
+  if (compensationInFlight) return compensationInFlight;
+  compensationInFlight = (async () => {
+    try { await worker.compensationPass(); }
+    catch (error) { process.stderr.write(`[worker] compensation failed: ${error.message}\\n`); }
+    finally { compensationInFlight = null; }
+  })();
+  return compensationInFlight;
 }
 
-process.stdout.write("SyncCut worker started\n");
+process.stdout.write("SyncCut worker started\\n");
 compensationLoop();
 compensationTimer = setInterval(compensationLoop, Math.max(1, Number(process.env.WORKER_COMPENSATION_MINUTES ?? 15)) * 60 * 1000);
-loop();
+const mainLoop = loop();
 
+let shuttingDown = false;
 async function shutdown() {
+  if (shuttingDown) return;
+  shuttingDown = true;
   stopped = true;
   if (compensationTimer) clearInterval(compensationTimer);
+  await Promise.allSettled([mainLoop, compensationInFlight].filter(Boolean));
   await pool.end().catch(() => {});
-  process.exit(0);
 }
 process.on("SIGINT", shutdown);
 process.on("SIGTERM", shutdown);

@@ -5,8 +5,37 @@ import { runConnectionSync } from "./connection-sync.mjs";
 
 const sha256Hex = (bytes) => createHash("sha256").update(bytes).digest("hex");
 
-export function createSyncWorker({ pool, queue, objectStore, makeClient, compensationMinutes = 15, inboxBatchSize = 50, log = () => {} }) {
+export async function readLimitedResponse(response, maxBytes) {
+  if (!Number.isInteger(maxBytes) || maxBytes < 1) throw new RangeError("maxBytes must be a positive integer.");
+  if (!response?.ok) throw new Error(`Attachment download failed with HTTP ${response?.status ?? 0}.`);
+  const declaredLength = Number(response.headers?.get("content-length"));
+  if (Number.isFinite(declaredLength) && declaredLength > maxBytes) {
+    throw new Error(`Attachment exceeds the configured ${maxBytes}-byte limit.`);
+  }
+  if (!response.body?.getReader) throw new Error("Attachment response has no readable body.");
+  const reader = response.body.getReader();
+  const chunks = [];
+  let size = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.byteLength;
+      if (size > maxBytes) {
+        await reader.cancel().catch(() => {});
+        throw new Error(`Attachment exceeds the configured ${maxBytes}-byte limit.`);
+      }
+      chunks.push(Buffer.from(value));
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  return Buffer.concat(chunks, size);
+}
+
+export function createSyncWorker({ pool, queue, objectStore, makeClient, compensationMinutes = 15, inboxBatchSize = 50, maxAttachmentBytes = 256 * 1024 * 1024, log = () => {} }) {
   if (!pool || !queue || !objectStore || !makeClient) throw new Error("pool, queue, objectStore and makeClient are required");
+  if (!Number.isInteger(maxAttachmentBytes) || maxAttachmentBytes < 1) throw new RangeError("maxAttachmentBytes must be a positive integer.");
 
   async function loadConnection(tenantId, connectionId) {
     const result = await pool.query(
@@ -86,7 +115,7 @@ export function createSyncWorker({ pool, queue, objectStore, makeClient, compens
 
   async function archiveAttachments(connection, client) {
     const pending = await pool.query(
-      `select v.id, v.asset_id, v.version_number, v.file_token, v.original_filename, v.mime_type, v.download_extra
+      `select v.id, v.asset_id, v.version_number, v.file_token, v.original_filename, v.mime_type, v.size_bytes, v.download_extra
          from asset_versions v
          join media_assets a on a.id = v.asset_id and a.tenant_id = v.tenant_id
         where v.tenant_id = $1 and a.connection_id = $2 and v.storage_key is null
@@ -96,13 +125,20 @@ export function createSyncWorker({ pool, queue, objectStore, makeClient, compens
     let archived = 0;
     for (const version of pending.rows) {
       const response = await client.downloadAttachment({ fileToken: version.file_token, extra: version.download_extra });
-      const bytes = Buffer.from(await response.arrayBuffer());
+      const bytes = await readLimitedResponse(response, maxAttachmentBytes);
+      if (version.size_bytes != null && Number(version.size_bytes) !== bytes.length) {
+        throw new Error(`Attachment size mismatch for version ${version.id}: expected ${version.size_bytes}, received ${bytes.length}.`);
+      }
       const digest = sha256Hex(bytes);
       const safeName = (version.original_filename ?? "audio").replace(/[\\/]/g, "_");
       const key = `tenants/${connection.tenant_id}/assets/${version.asset_id}/v${version.version_number}/${safeName}`;
       await objectStore.put(key, bytes, { contentType: version.mime_type ?? "application/octet-stream" });
+      if (typeof objectStore.head === "function") {
+        const stored = await objectStore.head(key);
+        if (!stored || stored.size !== bytes.length) throw new Error(`Object storage verification failed for asset version ${version.id}.`);
+      }
       await pool.query(
-        `update asset_versions set storage_key = $2, sha256 = $3, stored_at = now() where id = $1 and tenant_id = $4`,
+        `update asset_versions set storage_key = $2, sha256 = $3, stored_at = now() where id = $1 and tenant_id = $4 and storage_key is null`,
         [version.id, key, digest, connection.tenant_id],
       );
       archived += 1;
