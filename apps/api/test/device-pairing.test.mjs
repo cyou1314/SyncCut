@@ -128,7 +128,7 @@ test("Mac device pairing is one-time, tenant-scoped, and revocable", {
     response = await fetch(root + "/api/console/devices", { headers: { cookie } });
     assert.equal(response.status, 200);
     const listed = await response.json();
-    assert.equal(listed.devices.length, 2);
+    assert.equal(listed.devices.length, 1);
     assert.equal(listed.devices[0].id, paired.deviceId);
     assert.equal(Object.hasOwn(listed.devices[0], "device_token_hash"), false);
 
@@ -162,6 +162,10 @@ test("Mac device pairing is one-time, tenant-scoped, and revocable", {
     });
     assert.equal(secondPairResponse.status, 201);
     const secondDevice = await secondPairResponse.json();
+
+    response = await fetch(root + "/api/console/devices", { headers: { cookie } });
+    assert.equal(response.status, 200);
+    assert.equal((await response.json()).devices.length, 2);
 
     response = await fetch(root + `/api/console/devices/${paired.deviceId}/jobs`, {
       method: "POST",
