@@ -572,7 +572,7 @@ struct AgentMenuView: View {
                     }
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(model.isPairing || model.cloudOrigin.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || model.pairingCode.filter(\\.isHexDigit).count != 16 || model.deviceName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .disabled(model.isPairing || model.cloudOrigin.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || model.pairingCode.filter { $0.isHexDigit }.count != 16 || model.deviceName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
             if !model.cloudMessage.isEmpty {
                 Text(model.cloudMessage)
