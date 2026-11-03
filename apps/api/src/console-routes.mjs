@@ -174,7 +174,7 @@ export function createConsoleRoutes({pool,appId,appSecret,encryptionKey,publicOr
           from sync_devices where tenant_id=$1 order by paired_at desc`,[actor.tenant_id]);
         return send(res,200,{devices:devices.rows}),true;
       }
-      const revokeMatch=url.pathname.match(/^\\/api\\/console\\/devices\\/([0-9a-f-]{36})\\/revoke$/i);
+      const revokeMatch=url.pathname.match(/^\/api\/console\/devices\/([0-9a-f-]{36})\/revoke$/i);
       if(req.method==='POST' && revokeMatch) {
         if(!['owner','admin'].includes(actor.role)) return send(res,403,{error:'insufficient_role'}),true;
         const result=await pool.query(`update sync_devices set status='revoked'
