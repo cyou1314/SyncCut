@@ -9,7 +9,7 @@ test('metadata changes update the manifest without creating an audio version',as
  const d=await mkdtemp(path.join(os.tmpdir(),'sc-metadata-'));
  try{
   const audio=path.join(d,'rain.wav'),csvPath=path.join(d,'assets.csv'),library=path.join(d,'library'),manifestPath=path.join(library,'manifest.json');
-  const first='素材名称,素材类型,音频附件,项目名称,集数,备注\\n雨声,音效,rain.wav,雁回关,EP015,旧备注\\n';
+  const first='素材名称,素材类型,音频附件,项目名称,集数,备注\n雨声,音效,rain.wav,雁回关,EP015,旧备注\n';
   await writeFile(audio,'same-audio');await writeFile(csvPath,first);
   let plan=await previewCsvImport({csvPath,audioDirectory:d});
   await applyImportPlan({plan,libraryDirectory:library,manifestPath,confirm:true});
