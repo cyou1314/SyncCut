@@ -99,6 +99,11 @@ final class AgentViewModel: ObservableObject {
         NSWorkspace.shared.open(libraryURL)
     }
 
+    func revealVersion(_ version: LibraryAssetVersion) {
+        let url = URL(fileURLWithPath: version.diskPath)
+        NSWorkspace.shared.activateFileViewerSelecting([url])
+    }
+
     func refreshLibrary() {
         guard let libraryURL, let manifestURL else {
             libraryAssets = []
@@ -661,6 +666,13 @@ struct AgentMenuView: View {
                             }
                             .buttonStyle(.plain)
                             .help("试听此版本")
+                            Button {
+                                model.revealVersion(version)
+                            } label: {
+                                Image(systemName: "folder")
+                            }
+                            .buttonStyle(.plain)
+                            .help("在 Finder 中显示文件")
                         }
                     }
                 }
