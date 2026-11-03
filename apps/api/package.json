@@ -1,12 +1,13 @@
 {
   "name": "@synccut/api",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "type": "module",
   "engines": { "node": ">=22" },
   "scripts": {
     "start": "node --env-file=.env src/server.mjs",
-    "test": "node --test"
+    "test": "node --test",
+    "import:media": "node ./bin/import-media.mjs"
   },
   "dependencies": {
     "pg": "^8.13.1"
