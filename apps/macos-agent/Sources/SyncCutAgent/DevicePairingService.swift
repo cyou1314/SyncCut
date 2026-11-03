@@ -70,6 +70,12 @@ private struct FailJobRequest: Encodable {
     let error: String
 }
 
+private struct FailJobResponse: Decodable {
+    let ok: Bool
+    let retried: Bool?
+    let backoffSeconds: Int?
+}
+
 private struct PairErrorResponse: Decodable {
     let error: String?
 }
@@ -258,16 +264,15 @@ final class DevicePairingService {
     }
 
     func failJob(server: String, token: String, jobId: String, message: String) async throws {
-        let _: [String: Bool] = try await send(
+        let _: FailJobResponse = try await send(
             server: server,
-            path: "api/agent/jobs/\(jobId)/fail",
+            path: "api/agent/jobs/\\(jobId)/fail",
             method: "POST",
             body: FailJobRequest(error: String(message.prefix(1000))),
             token: token,
-            response: [String: Bool].self
+            response: FailJobResponse.self
         )
     }
-
     func downloadAsset(from url: URL) async throws -> URL {
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
