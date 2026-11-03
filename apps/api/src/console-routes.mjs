@@ -154,7 +154,7 @@ export function createConsoleRoutes({pool,appId,appSecret,encryptionKey,publicOr
           return send(res,409,{error:'job_assets_unavailable'}),true;
         }
       }
-      const agentJobMatch=url.pathname.match(/^\\/api\\/agent\\/jobs\\/([0-9a-f-]{36})\\/(heartbeat|complete|fail)$/i);
+      const agentJobMatch=url.pathname.match(/^\/api\/agent\/jobs\/([0-9a-f-]{36})\/(heartbeat|complete|fail)$/i);
       if(req.method==='POST' && agentJobMatch) {
         const device=await authenticateDevice(req);
         if(!device) return send(res,401,{error:'device_unauthorized'}),true;
@@ -215,7 +215,7 @@ export function createConsoleRoutes({pool,appId,appSecret,encryptionKey,publicOr
         return send(res,200,{user:actor.display_name,workspace:actor.workspace_name,role:actor.role,authorization:grant.rows[0]?.status??'needs_reauth',provision:state?{status:state.status,pending:state.pending,baseUrl:state.baseUrl,fieldCount:Object.keys(state.fields??{}).length,tableId:state.tableId,lastError:state.lastError??null}:null,connected:!!conn,webhookUrl,webhookSecretAvailable,stats,run,provisionRunning:tasks.has(`p:${actor.tenant_id}`),syncRunning:tasks.has(`s:${actor.tenant_id}`)}),true;
       }
       if(req.method==='POST') requireSameOrigin(req,publicOrigin);
-      const createDeviceJobMatch=url.pathname.match(/^\\/api\\/console\\/devices\\/([0-9a-f-]{36})\\/jobs$/i);
+      const createDeviceJobMatch=url.pathname.match(/^\/api\/console\/devices\/([0-9a-f-]{36})\/jobs$/i);
       if(req.method==='POST' && createDeviceJobMatch) {
         if(!['owner','admin','editor'].includes(actor.role)) return send(res,403,{error:'insufficient_role'}),true;
         const body=await readJsonBody(req);
