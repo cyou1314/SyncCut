@@ -6,6 +6,7 @@
   "engines": { "node": ">=22" },
   "scripts": {
     "start": "node --env-file=.env src/server.mjs",
+    "worker": "node --env-file=.env --env-file=.env.worker src/worker.mjs",
     "test": "node --test",
     "import:media": "node ./bin/import-media.mjs"
   },

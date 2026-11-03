@@ -6,8 +6,8 @@ import { createProvisioningJournal } from './provisioning-journal.mjs';
 import { createCredentialCipher } from './credential-crypto.mjs';
 import { FeishuBitableClient } from './bitable-client.mjs';
 import { provisionBitable } from './bitable-provisioner.mjs';
-import { fullSync,inspectConnection } from './bitable-sync.mjs';
-import { createAssetStore } from './asset-store.mjs';
+import { inspectConnection } from './bitable-sync.mjs';
+import { runConnectionSync } from './connection-sync.mjs';
 import { newSessionId,sessionDigest,sessionFromCookie,sessionCookie,requireSameOrigin,findSession,bindPersonalWorkspace } from './console-auth.mjs';
 
 export function createConsoleRoutes({pool,appId,appSecret,encryptionKey,publicOrigin,appMode='custom_app',fetchImpl=fetch}) {
@@ -78,15 +78,7 @@ export function createConsoleRoutes({pool,appId,appSecret,encryptionKey,publicOr
         if(!['owner','admin','editor'].includes(actor.role)) return send(res,403,{error:'insufficient_role'}),true;
         const conn=await connection(actor);if(!conn)return send(res,409,{error:'no_connection'}),true;
         const started=startTask(`s:${actor.tenant_id}`,async()=>{
-          const db=await pool.connect();let locked=false,run;
-          try {
-            locked=(await db.query('select pg_try_advisory_lock(hashtextextended($1,0)) as locked',[`synccut-sync:${actor.tenant_id}`])).rows[0].locked;
-            if(!locked)return;
-            run=(await db.query("insert into feishu_sync_runs (tenant_id,connection_id,status) values ($1,$2,'running') returning id",[actor.tenant_id,conn.id])).rows[0].id;
-            const result=await fullSync({client:clientFor(actor),connection:{appToken:conn.app_token,tableId:conn.table_id,fieldMapping:conn.field_mapping},store:createAssetStore(pool,actor.tenant_id,conn.id),onProgress:async p=>db.query('update feishu_sync_runs set imported=$1,duplicates=$2,failed=$3 where id=$4 and tenant_id=$5',[p.imported,p.duplicates,p.failed,run,actor.tenant_id])});
-            await db.query('update feishu_sync_runs set status=$1,imported=$2,duplicates=$3,failed=$4,errors=$5::jsonb,finished_at=now() where id=$6 and tenant_id=$7',[result.failed?'partial':'completed',result.imported,result.duplicates,result.failed,JSON.stringify(result.errors),run,actor.tenant_id]);
-          } catch {if(run)await db.query("update feishu_sync_runs set status='failed',errors=$1::jsonb,finished_at=now() where id=$2 and tenant_id=$3",[JSON.stringify([{reason:'同步中断，请检查连接后重试'}]),run,actor.tenant_id]).catch(()=>{});}
-          finally {let broken=false;if(locked)await db.query('select pg_advisory_unlock(hashtextextended($1,0))',[`synccut-sync:${actor.tenant_id}`]).catch(()=>{broken=true});db.release(broken);}
+          await runConnectionSync({pool,tenantId:actor.tenant_id,connection:conn,client:clientFor(actor)});
         });return send(res,202,{started}),true;
       }
       return send(res,404,{error:'not_found'}),true;
