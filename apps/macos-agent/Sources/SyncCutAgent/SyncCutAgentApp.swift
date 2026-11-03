@@ -25,6 +25,12 @@ final class AgentViewModel: ObservableObject {
         .appendingPathComponent("SyncCut/Cache", isDirectory: true).path ?? "不可用"
 
     @Published var activeTab = "导入"
+    @Published var cloudOrigin = UserDefaults.standard.string(forKey: "SyncCut.cloudOrigin") ?? ""
+    @Published var pairingCode = ""
+    @Published var deviceName = Host.current().localizedName ?? "SyncCut Mac"
+    @Published var cloudDevice: DeviceIdentity?
+    @Published var cloudMessage = ""
+    @Published var isPairing = false
     @Published var tableURL: URL?
     @Published var audioURL: URL?
     @Published var libraryURL: URL?
@@ -42,6 +48,8 @@ final class AgentViewModel: ObservableObject {
     @Published private(set) var playingVersionKey: String?
 
     private let importer = LocalImportService()
+    private let devicePairingService = DevicePairingService()
+    private let deviceTokenStore = DeviceTokenStore()
     private let libraryBookmarkKey = "SyncCut.libraryBookmark.v1"
     private var audioPlayer: AVAudioPlayer?
     private var audioAccessGranted = false
@@ -53,6 +61,7 @@ final class AgentViewModel: ObservableObject {
 
     init() {
         restoreLibraryBookmark()
+        Task { await restoreDeviceSession() }
     }
 
     var manifestURL: URL? { libraryURL?.appendingPathComponent("manifest.json") }
@@ -305,6 +314,115 @@ final class AgentViewModel: ObservableObject {
         }
     }
 
+    func pairCloudDevice() {
+        guard !isPairing else { return }
+        let server = cloudOrigin.trimmingCharacters(in: .whitespacesAndNewlines)
+        let code = pairingCode
+        let name = deviceName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !server.isEmpty, !name.isEmpty else {
+            cloudMessage = "请填写云端 API 地址和设备名称。"
+            return
+        }
+        isPairing = true
+        cloudMessage = "正在连接云端并验证配对码…"
+        Task {
+            defer { isPairing = false }
+            do {
+                let pairedResult = try await devicePairingService.pair(
+                    server: server,
+                    code: code,
+                    deviceName: name,
+                    appVersion: "0.3.0",
+                    macosVersion: ProcessInfo.processInfo.operatingSystemVersionString
+                )
+                try deviceTokenStore.save(pairedResult.deviceToken)
+                UserDefaults.standard.set(server, forKey: "SyncCut.cloudOrigin")
+                cloudOrigin = server
+                let identity = try await devicePairingService.currentDevice(server: server, token: pairedResult.deviceToken)
+                cloudDevice = identity
+                paired = true
+                status = "已连接云端"
+                pairingCode = ""
+                cloudMessage = "设备配对成功。设备凭证已保存到 macOS 钥匙串。"
+                try? await devicePairingService.heartbeat(
+                    server: server,
+                    token: pairedResult.deviceToken,
+                    appVersion: "0.3.0",
+                    macosVersion: ProcessInfo.processInfo.operatingSystemVersionString
+                )
+            } catch {
+                cloudMessage = error.localizedDescription
+            }
+        }
+    }
+
+    func restoreDeviceSession() async {
+        do {
+            guard let token = try deviceTokenStore.load() else {
+                paired = false
+                status = "尚未配对"
+                return
+            }
+            let server = cloudOrigin.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !server.isEmpty else {
+                paired = true
+                status = "待配置云端"
+                cloudMessage = "检测到已保存的设备凭证，请填写云端 API 地址。"
+                return
+            }
+            do {
+                let identity = try await devicePairingService.currentDevice(server: server, token: token)
+                cloudDevice = identity
+                paired = true
+                status = "已连接云端"
+                try? await devicePairingService.heartbeat(
+                    server: server,
+                    token: token,
+                    appVersion: "0.3.0",
+                    macosVersion: ProcessInfo.processInfo.operatingSystemVersionString
+                )
+            } catch let error as DevicePairingError {
+                if case .httpStatus(401, _) = error {
+                    try? deviceTokenStore.delete()
+                    paired = false
+                    status = "授权已撤销"
+                    cloudMessage = "云端设备授权已失效，请重新配对。"
+                } else {
+                    paired = true
+                    status = "云端暂不可达"
+                    cloudMessage = error.localizedDescription
+                }
+            }
+        } catch {
+            paired = false
+            status = "凭证读取失败"
+            cloudMessage = error.localizedDescription
+        }
+    }
+
+    func disconnectCloudDevice() {
+        Task {
+            var remoteRevoked = false
+            do {
+                if let token = try deviceTokenStore.load(), !cloudOrigin.isEmpty {
+                    try await devicePairingService.unpair(server: cloudOrigin, token: token)
+                    remoteRevoked = true
+                }
+            } catch {
+                cloudMessage = "云端暂时无法撤销；将清除本机凭证。必要时请在 Web 控制台撤销该设备。"
+            }
+            do {
+                try deviceTokenStore.delete()
+                cloudDevice = nil
+                paired = false
+                status = "尚未配对"
+                cloudMessage = remoteRevoked ? "设备已解除配对。" : "本机凭证已清除。若设备仍显示在控制台，请手动撤销。"
+            } catch {
+                cloudMessage = "无法清除钥匙串凭证：\\(error.localizedDescription)"
+            }
+        }
+    }
+
     private static func kindCode(_ label: String) -> String {
         switch label {
         case "音乐": return "music"
@@ -327,13 +445,16 @@ struct AgentMenuView: View {
             Picker("页面", selection: $model.activeTab) {
                 Text("导入").tag("导入")
                 Text("素材库").tag("素材库")
+                Text("设备").tag("设备")
             }
             .pickerStyle(.segmented)
 
             if model.activeTab == "导入" {
                 importPanel
-            } else {
+            } else if model.activeTab == "素材库" {
                 libraryPanel
+            } else {
+                devicePanel
             }
 
             if !model.errors.isEmpty {
@@ -406,6 +527,64 @@ struct AgentMenuView: View {
             Spacer()
             Circle().fill(model.paired ? .green : .orange).frame(width: 7, height: 7)
             Text(model.status).font(.caption2).foregroundStyle(.secondary)
+        }
+    }
+
+    private var devicePanel: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("云端设备连接").font(.subheadline.weight(.semibold))
+                Spacer()
+                Circle().fill(model.paired ? .green : .orange).frame(width: 7, height: 7)
+                Text(model.status).font(.caption2).foregroundStyle(.secondary)
+            }
+            TextField("云端 API 地址，例如 https://api.example.com", text: $model.cloudOrigin)
+                .textFieldStyle(.roundedBorder)
+                .disabled(model.paired)
+            TextField("设备名称", text: $model.deviceName)
+                .textFieldStyle(.roundedBorder)
+                .disabled(model.paired)
+            if let device = model.cloudDevice {
+                Divider()
+                Text(device.deviceName).font(.caption.weight(.semibold))
+                Text("设备 ID：\\(device.deviceId)")
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+                Text("工作区：\\(device.tenantId)")
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+                Button("解除本机配对") { model.disconnectCloudDevice() }
+                    .buttonStyle(.bordered)
+            } else {
+                SecureField("输入飞书控制台生成的 16 位一次性配对码", text: $model.pairingCode)
+                    .textFieldStyle(.roundedBorder)
+                    .textCase(.uppercase)
+                    .disabled(model.isPairing)
+                Button {
+                    model.pairCloudDevice()
+                } label: {
+                    if model.isPairing {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Label("配对这台 Mac", systemImage: "link")
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(model.isPairing || model.cloudOrigin.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || model.pairingCode.filter(\\.isHexDigit).count != 16 || model.deviceName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+            if !model.cloudMessage.isEmpty {
+                Text(model.cloudMessage)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 0)
+            Text("设备凭证保存在 macOS 钥匙串，不写入偏好设置或普通配置文件。设备可以在 Web 控制台单独撤销。")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
