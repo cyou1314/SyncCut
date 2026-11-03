@@ -4,7 +4,7 @@ import { randomUUID, createHash } from "node:crypto";
 import { readFile, readdir } from "node:fs/promises";
 import { Pool } from "pg";
 import { createTaskQueue } from "../src/task-queue.mjs";
-import { createSyncWorker } from "../src/sync-worker.mjs";
+import { createSyncWorker, readLimitedResponse } from "../src/sync-worker.mjs";
 
 async function applyMigrations(pool) {
   const files = (await readdir(new URL("../migrations/", import.meta.url))).filter((f) => f.endsWith(".sql")).sort();
@@ -41,6 +41,23 @@ const record = {
     开始: "1.5",
   },
 };
+
+test("attachment response reader enforces declared and streamed byte limits", async () => {
+  const ok = await readLimitedResponse(new Response(Buffer.from("12345")), 5);
+  assert.equal(ok.toString("utf8"), "12345");
+  await assert.rejects(
+    readLimitedResponse(new Response(Buffer.from("123456")), 5),
+    /configured 5-byte limit/,
+  );
+  await assert.rejects(
+    readLimitedResponse(new Response("12345", { headers: { "content-length": "100" } }), 5),
+    /configured 5-byte limit/,
+  );
+  await assert.rejects(
+    readLimitedResponse(new Response("failure", { status: 503 }), 100),
+    /HTTP 503/,
+  );
+});
 
 test("worker folds a webhook event into a sync job and archives the attachment", { skip: !process.env.TEST_DATABASE_URL, timeout: 30000 }, async () => {
   const schema = `synccut_worker_${randomUUID().replaceAll("-", "")}`;
