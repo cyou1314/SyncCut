@@ -39,12 +39,12 @@ test('CLI cancellation leaves library untouched; explicit IMPORT creates a manif
  try{
   const table=path.join(root,'assets.csv'),audio=path.join(root,'audio'),library=path.join(root,'library');
   await mkdir(audio);await writeFile(path.join(audio,'rain.wav'),'audio-data');
-  await writeFile(table,'素材名称,素材类型,音频附件,项目名称,集数\\n雨声,音效,rain.wav,雁回关,EP015\\n');
+  await writeFile(table,'素材名称,素材类型,音频附件,项目名称,集数\n雨声,音效,rain.wav,雁回关,EP015\n');
   const argv=['--table',table,'--audio-dir',audio,'--library',library];
-  const cancelled=await runProcess(argv,'cancel\\n');
+  const cancelled=await runProcess(argv,'cancel\n');
   assert.equal(cancelled.code,0,cancelled.stdout+cancelled.stderr);
   await assert.rejects(access(path.join(library,'manifest.json')));
-  const confirmed=await runProcess(argv,'IMPORT\\n');
+  const confirmed=await runProcess(argv,'IMPORT\n');
   assert.equal(confirmed.code,0,confirmed.stdout+confirmed.stderr);
   const manifest=JSON.parse(await readFile(path.join(library,'manifest.json'),'utf8'));
   assert.equal(manifest.assets.length,1);
