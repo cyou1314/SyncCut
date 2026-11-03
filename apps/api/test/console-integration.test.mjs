@@ -2,7 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createServer} from 'node:http';
 import {readFile,readdir} from 'node:fs/promises';
-import {randomBytes,randomUUID} from 'node:crypto';
+import {createHash,randomBytes,randomUUID} from 'node:crypto';
+import {bearerSecretMatches} from '../src/bitable-webhook.mjs';
 import {Pool} from 'pg';
 import {createConsoleRoutes} from '../src/console-routes.mjs';
 
@@ -21,6 +22,15 @@ test('OAuth session, provisioning, sync and workspace isolation over HTTP', {ski
   const cookie=await login();let r=await fetch(root+'/api/console/provision',{method:'POST',headers:{cookie,origin}});assert.equal(r.status,202);
   async function status(){const response=await fetch(root+'/api/console/status',{headers:{cookie}});assert.equal(response.status,200);return response.json()}
   let state;for(let i=0;i<100;i++){state=await status();if(state.provision?.status==='complete'&&!state.provisionRunning)break;await new Promise(r=>setTimeout(r,20))}assert.equal(state.provision?.status,'complete');assert.equal(state.provision.fieldCount,19);
+  state=await status();assert.equal(state.webhookSecretAvailable,true);assert.match(state.webhookUrl,/^http:\/\/127\.0\.0\.1:8787\/webhooks\/feishu\/bitable\//);
+  r=await fetch(root+'/api/console/webhook-secret/reveal',{method:'POST',headers:{cookie,origin}});assert.equal(r.status,200);const firstSecret=await r.json();assert.match(firstSecret.secret,/^[A-Za-z0-9_-]{43}$/);assert.equal(firstSecret.webhookUrl,state.webhookUrl);
+  const storedSecret=(await pool.query('select webhook_secret_hash from feishu_connections')).rows[0].webhook_secret_hash;assert.equal(storedSecret,createHash('sha256').update(firstSecret.secret,'utf8').digest('hex'));assert.equal(bearerSecretMatches('Bearer '+firstSecret.secret,storedSecret),true);
+  assert.equal((await pool.query('select count(*)::int as n from webhook_secret_reveals')).rows[0].n,0);
+  r=await fetch(root+'/api/console/webhook-secret/reveal',{method:'POST',headers:{cookie,origin}});assert.equal(r.status,404);
+  r=await fetch(root+'/api/console/webhook-secret/rotate',{method:'POST',headers:{cookie,origin}});assert.equal(r.status,200);
+  state=await status();assert.equal(state.webhookSecretAvailable,true);
+  r=await fetch(root+'/api/console/webhook-secret/reveal',{method:'POST',headers:{cookie,origin}});assert.equal(r.status,200);const rotatedSecret=await r.json();assert.notEqual(rotatedSecret.secret,firstSecret.secret);
+  const rotatedHash=(await pool.query('select webhook_secret_hash from feishu_connections')).rows[0].webhook_secret_hash;assert.equal(rotatedHash,createHash('sha256').update(rotatedSecret.secret,'utf8').digest('hex'));assert.equal(bearerSecretMatches('Bearer '+firstSecret.secret,rotatedHash),false);assert.equal(bearerSecretMatches('Bearer '+rotatedSecret.secret,rotatedHash),true);
   r=await fetch(root+'/api/console/sync',{method:'POST',headers:{cookie,origin}});assert.equal(r.status,202);
   for(let i=0;i<100;i++){state=await status();if(state.run?.status==='completed')break;await new Promise(r=>setTimeout(r,20))}assert.equal(state.run?.status,'completed');assert.equal(state.stats.sfx,1);assert.equal((await pool.query('select app_mode from feishu_connections')).rows[0].app_mode,'store_app');
   r=await fetch(root+'/api/console/provision',{method:'POST',headers:{cookie,origin:'https://evil.example'}});assert.equal(r.status,403);
