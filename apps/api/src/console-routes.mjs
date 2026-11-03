@@ -215,6 +215,20 @@ export function createConsoleRoutes({pool,appId,appSecret,encryptionKey,publicOr
         return send(res,200,{user:actor.display_name,workspace:actor.workspace_name,role:actor.role,authorization:grant.rows[0]?.status??'needs_reauth',provision:state?{status:state.status,pending:state.pending,baseUrl:state.baseUrl,fieldCount:Object.keys(state.fields??{}).length,tableId:state.tableId,lastError:state.lastError??null}:null,connected:!!conn,webhookUrl,webhookSecretAvailable,stats,run,provisionRunning:tasks.has(`p:${actor.tenant_id}`),syncRunning:tasks.has(`s:${actor.tenant_id}`)}),true;
       }
       if(req.method==='POST') requireSameOrigin(req,publicOrigin);
+      if(req.method==='GET' && url.pathname==='/api/console/assets') {
+        if(!['owner','admin','editor'].includes(actor.role)) return send(res,403,{error:'insufficient_role'}),true;
+        const conn=await connection(actor);if(!conn)return send(res,409,{error:'no_connection'}),true;
+        const assets=await pool.query(`select a.id as asset_id,a.name,a.kind,a.project_name,a.episode,a.scene,a.shot,
+          v.id as asset_version_id,v.version_number,v.original_filename,v.mime_type,v.size_bytes,v.sha256,v.storage_key,v.created_at
+          from media_assets a
+          join lateral (
+            select * from asset_versions v where v.asset_id=a.id and v.tenant_id=a.tenant_id
+            order by v.version_number desc limit 1
+          ) v on true
+          where a.tenant_id=$1 and a.connection_id=$2
+          order by a.name asc`,[actor.tenant_id,conn.id]);
+        return send(res,200,{assets:assets.rows.map(v=>({...v,size_bytes:Number(v.size_bytes),ready:!!(v.storage_key&&v.sha256)}))}),true;
+      }
       const createDeviceJobMatch=url.pathname.match(/^\/api\/console\/devices\/([0-9a-f-]{36})\/jobs$/i);
       if(req.method==='POST' && createDeviceJobMatch) {
         if(!['owner','admin','editor'].includes(actor.role)) return send(res,403,{error:'insufficient_role'}),true;
