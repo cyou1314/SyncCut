@@ -146,7 +146,7 @@ test("Mac device pairing is one-time, tenant-scoped, and revocable", {
     response = await fetch(root + `/api/console/devices/${paired.deviceId}/jobs`, {
       method: "POST",
       headers: { cookie, origin, "content-type": "application/json" },
-      body: JSON.stringify({ job_type: "import_media", asset_version_ids: [version], idempotency_key: "device-import-1" }),
+      body: JSON.stringify({ job_type: "sync_assets", asset_version_ids: [version], idempotency_key: "device-import-1" }),
     });
     assert.equal(response.status, 202);
     const createdJob = await response.json();
@@ -158,7 +158,7 @@ test("Mac device pairing is one-time, tenant-scoped, and revocable", {
     assert.equal(response.status, 200);
     const leased = await response.json();
     assert.equal(leased.job.id, createdJob.jobId);
-    assert.equal(leased.job.jobType, "import_media");
+    assert.equal(leased.job.jobType, "sync_assets");
     assert.equal(leased.job.assets.length, 1);
     assert.equal(leased.job.assets[0].assetVersionId, version);
     assert.equal(leased.job.assets[0].sha256, createHash("sha256").update("audio").digest("hex"));
