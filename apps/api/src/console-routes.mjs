@@ -165,18 +165,22 @@ export function createConsoleRoutes({pool,appId,appSecret,encryptionKey,publicOr
         const deviceQueue=createTaskQueue(pool,{workerId:`device:${device.id}:${agentSession.toLowerCase()}`});
         const jobId=agentJobMatch[1],action=agentJobMatch[2];
         if(action==='heartbeat') {
-          await deviceQueue.heartbeat(jobId,{leaseSeconds:120});
+          try { await deviceQueue.heartbeat(jobId,{leaseSeconds:120}); }
+          catch { return send(res,409,{error:'job_lease_lost'}),true; }
           return send(res,200,{ok:true}),true;
         }
         const body=await readJsonBody(req);
         if(action==='complete') {
           const result=body.result&&typeof body.result==='object'&&!Array.isArray(body.result)?body.result:{};
-          await deviceQueue.succeed(jobId,result);
+          try { await deviceQueue.succeed(jobId,result); }
+          catch { return send(res,409,{error:'job_lease_lost'}),true; }
           return send(res,200,{ok:true}),true;
         }
         const message=typeof body.error==='string'?body.error.slice(0,1000):'Device job failed';
-        const outcome=await deviceQueue.fail(jobId,new Error(message));
-        return send(res,200,{ok:true,...outcome}),true;
+        try {
+          const outcome=await deviceQueue.fail(jobId,new Error(message));
+          return send(res,200,{ok:true,...outcome}),true;
+        } catch { return send(res,409,{error:'job_lease_lost'}),true; }
       }
       if(req.method==='POST' && url.pathname==='/api/agent/unpair') {
         const device=await authenticateDevice(req);

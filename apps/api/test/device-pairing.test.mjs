@@ -176,14 +176,16 @@ test("Mac device pairing is one-time, tenant-scoped, and revocable", {
     const createdJob = await response.json();
     assert.equal(createdJob.created, true);
 
+    const firstAgentSession = randomUUID();
+    const secondAgentSession = randomUUID();
     response = await fetch(root + "/api/agent/jobs/next", {
-      headers: { authorization: `Bearer ${secondDevice.deviceToken}` },
+      headers: { authorization: `Bearer ${secondDevice.deviceToken}`, "x-synccut-agent-session": secondAgentSession },
     });
     assert.equal(response.status, 200);
     assert.equal((await response.json()).job, null, "a different paired Mac must not lease another device's job");
 
     response = await fetch(root + "/api/agent/jobs/next", {
-      headers: { authorization: `Bearer ${paired.deviceToken}` },
+      headers: { authorization: `Bearer ${paired.deviceToken}`, "x-synccut-agent-session": firstAgentSession },
     });
     assert.equal(response.status, 200);
     const leased = await response.json();
@@ -195,12 +197,16 @@ test("Mac device pairing is one-time, tenant-scoped, and revocable", {
     assert.match(leased.job.assets[0].downloadUrl, /^https:\/\/s3\.example\.test\//);
 
     response = await fetch(root + `/api/agent/jobs/${createdJob.jobId}/heartbeat`, {
-      method: "POST", headers: { authorization: `Bearer ${paired.deviceToken}`, "content-type": "application/json" }, body: "{}",
+      method: "POST", headers: { authorization: `Bearer ${paired.deviceToken}`, "x-synccut-agent-session": secondAgentSession, "content-type": "application/json" }, body: "{}",
+    });
+    assert.equal(response.status, 409, "a different agent process must not heartbeat another process's lease");
+    response = await fetch(root + `/api/agent/jobs/${createdJob.jobId}/heartbeat`, {
+      method: "POST", headers: { authorization: `Bearer ${paired.deviceToken}`, "x-synccut-agent-session": firstAgentSession, "content-type": "application/json" }, body: "{}",
     });
     assert.equal(response.status, 200);
     response = await fetch(root + `/api/agent/jobs/${createdJob.jobId}/complete`, {
       method: "POST",
-      headers: { authorization: `Bearer ${paired.deviceToken}`, "content-type": "application/json" },
+      headers: { authorization: `Bearer ${paired.deviceToken}`, "x-synccut-agent-session": firstAgentSession, "content-type": "application/json" },
       body: JSON.stringify({ result: { imported: 1, verified: true } }),
     });
     assert.equal(response.status, 200);
