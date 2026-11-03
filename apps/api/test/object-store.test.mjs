@@ -45,3 +45,21 @@ test("object store reports missing keys and HTTP failures", async () => {
   await assert.rejects(store.get("missing"), /404/);
   await assert.rejects(store.put("x", Buffer.from("y")), /404/);
 });
+
+test("object store rejects insecure remote endpoints, unsafe keys and excessive presign TTLs", () => {
+  assert.throws(() => createObjectStore({
+    endpoint: "http://storage.example.test",
+    bucket: "b",
+    accessKeyId: "AKID",
+    secretAccessKey: "secret",
+  }), /HTTPS/);
+  const store = createObjectStore({
+    endpoint: "https://s3.example.test",
+    bucket: "b",
+    accessKeyId: "AKID",
+    secretAccessKey: "secret",
+  });
+  assert.throws(() => store.presignGet("../outside"), /Object key is invalid/);
+  assert.throws(() => store.presignGet("audio.wav", { ttlSeconds: 604801 }), /ttlSeconds/);
+  assert.throws(() => store.presignGet("audio.wav", { ttlSeconds: 0 }), /ttlSeconds/);
+});
