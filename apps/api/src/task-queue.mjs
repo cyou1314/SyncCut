@@ -51,19 +51,22 @@ export function createTaskQueue(pool, { workerId = `worker-${randomUUID()}` } = 
     return enqueueWithClient(pool, args);
   }
 
-  async function leaseNext({ jobTypes, leaseSeconds = 120 }) {
+  async function leaseNext({ jobTypes, tenantId = null, deviceId = null, leaseSeconds = 120 }) {
     if (!Array.isArray(jobTypes) || !jobTypes.length) throw new Error("jobTypes are required");
     validateLeaseSeconds(leaseSeconds);
+    if (deviceId && !tenantId) throw new Error("tenantId is required when leasing for a device");
     const db = await pool.connect();
     try {
       await db.query("begin");
       const picked = await db.query(
         `select * from sync_jobs
           where status = 'queued' and next_attempt_at <= now() and job_type = any($1::text[])
+            and ($2::uuid is null or tenant_id = $2)
+            and ($3::uuid is null or device_id = $3)
           order by created_at asc
           for update skip locked
           limit 1`,
-        [jobTypes],
+        [jobTypes, tenantId, deviceId],
       );
       if (!picked.rows[0]) { await db.query("commit"); return null; }
       const job = picked.rows[0];
