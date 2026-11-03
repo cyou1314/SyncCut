@@ -89,3 +89,33 @@ test("task queue: failure retries with backoff, expired leases are reaped", { sk
     await admin.end();
   }
 });
+
+test("task queue fences an expired worker from beginning, heartbeating, failing or completing", { skip: !process.env.TEST_DATABASE_URL, timeout: 30000 }, async () => {
+  const { pool, admin, schema } = await migratedPool();
+  try {
+    const tenant = (await pool.query("insert into tenants (display_name) values ('Fence') returning id")).rows[0].id;
+    const stale = createTaskQueue(pool, { workerId: "stale-worker" });
+    const current = createTaskQueue(pool, { workerId: "current-worker" });
+    const { id } = await stale.enqueue({ tenantId: tenant, jobType: "full_sync", idempotencyKey: "fence-1" });
+    const leased = await stale.leaseNext({ jobTypes: ["full_sync"], leaseSeconds: 2 });
+    assert.equal(leased.id, id);
+    await stale.begin(id, { leaseSeconds: 2 });
+    await pool.query("update sync_jobs set lease_expires_at = now() - interval '1 second' where id = $1", [id]);
+    await assert.rejects(stale.heartbeat(id), /lease lost or expired/i);
+    await assert.rejects(stale.succeed(id, { stale: true }), /lease lost or expired/i);
+    await assert.rejects(stale.fail(id, new Error("stale failure")), /lease lost or expired/i);
+    await stale.reapExpired();
+    const replacement = await current.leaseNext({ jobTypes: ["full_sync"] });
+    assert.equal(replacement.id, id);
+    await assert.rejects(stale.begin(id), /lease lost or expired/i);
+    await current.begin(id);
+    await current.succeed(id, { current: true });
+    const row = (await pool.query("select status, result from sync_jobs where id = $1", [id])).rows[0];
+    assert.equal(row.status, "succeeded");
+    assert.equal(row.result.current, true);
+  } finally {
+    await pool.end();
+    await admin.query(`drop schema "${schema}" cascade`);
+    await admin.end();
+  }
+});
