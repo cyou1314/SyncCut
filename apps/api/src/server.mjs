@@ -59,7 +59,7 @@ const server = createServer(async (request, response) => {
     try {const html=await readFile(file);response.writeHead(200,{"Content-Type":"text/html; charset=utf-8","Cache-Control":"no-store","X-Content-Type-Options":"nosniff","Referrer-Policy":"no-referrer"});response.end(html);}
     catch {sendJson(response,500,{error:"page_unavailable"},requestId);} return;
   }
-  if (consoleRoutes && (url.pathname.startsWith('/api/console/') || url.pathname.startsWith('/auth/feishu/'))) {
+  if (consoleRoutes && (url.pathname.startsWith('/api/console/') || url.pathname.startsWith('/api/agent/') || url.pathname.startsWith('/auth/feishu/'))) {
     try { await consoleRoutes(request,response,url); } catch { sendJson(response,500,{error:'internal_error'},requestId); } return;
   }
   if (request.method === "GET" && url.pathname === "/health") {
