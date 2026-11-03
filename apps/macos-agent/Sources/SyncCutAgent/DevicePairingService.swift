@@ -166,6 +166,7 @@ final class DevicePairingService {
     private let session: URLSession
     private let encoder: JSONEncoder
     private let decoder: JSONDecoder
+    private let agentSessionId = UUID().uuidString.lowercased()
 
     init(session: URLSession = .shared) {
         self.session = session

@@ -129,7 +129,9 @@ export function createConsoleRoutes({pool,appId,appSecret,encryptionKey,publicOr
         const device=await authenticateDevice(req);
         if(!device) return send(res,401,{error:'device_unauthorized'}),true;
         if(!objectStore) return send(res,503,{error:'object_storage_unavailable'}),true;
-        const deviceQueue=createTaskQueue(pool,{workerId:`device:${device.id}`});
+        const agentSession=req.headers['x-synccut-agent-session'];
+        if(typeof agentSession!=='string'||!/^[0-9a-f-]{36}$/i.test(agentSession)) return send(res,400,{error:'invalid_agent_session'}),true;
+        const deviceQueue=createTaskQueue(pool,{workerId:`device:${device.id}:${agentSession.toLowerCase()}`});
         const job=await deviceQueue.leaseNext({jobTypes:['sync_assets'],tenantId:device.tenant_id,deviceId:device.id,leaseSeconds:120});
         if(!job) return send(res,200,{job:null}),true;
         try {
@@ -158,7 +160,9 @@ export function createConsoleRoutes({pool,appId,appSecret,encryptionKey,publicOr
       if(req.method==='POST' && agentJobMatch) {
         const device=await authenticateDevice(req);
         if(!device) return send(res,401,{error:'device_unauthorized'}),true;
-        const deviceQueue=createTaskQueue(pool,{workerId:`device:${device.id}`});
+        const agentSession=req.headers['x-synccut-agent-session'];
+        if(typeof agentSession!=='string'||!/^[0-9a-f-]{36}$/i.test(agentSession)) return send(res,400,{error:'invalid_agent_session'}),true;
+        const deviceQueue=createTaskQueue(pool,{workerId:`device:${device.id}:${agentSession.toLowerCase()}`});
         const jobId=agentJobMatch[1],action=agentJobMatch[2];
         if(action==='heartbeat') {
           await deviceQueue.heartbeat(jobId,{leaseSeconds:120});
