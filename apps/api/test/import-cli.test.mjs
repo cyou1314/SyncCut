@@ -29,13 +29,13 @@ test('CLI cancellation leaves library untouched; explicit IMPORT creates a manif
  try{
   const table=path.join(root,'assets.csv'),audio=path.join(root,'audio'),library=path.join(root,'library');
   await mkdir(audio);await writeFile(path.join(audio,'rain.wav'),'audio-data');
-  await writeFile(table,'素材名称,素材类型,音频附件,项目名称,集数\\n雨声,音效,rain.wav,雁回关,EP015\\n');
+  await writeFile(table,'素材名称,素材类型,音频附件,项目名称,集数\n雨声,音效,rain.wav,雁回关,EP015\n');
   const argv=['--table',table,'--audio-dir',audio,'--library',library];
   const cancelled=outputCapture();
-  assert.equal(await runImportCli({argv,input:Readable.from(['cancel\\n']),output:cancelled.stream}),0);
+  assert.equal(await runImportCli({argv,input:Readable.from(['cancel\n']),output:cancelled.stream}),0);
   await assert.rejects(access(path.join(library,'manifest.json')));
   const confirmed=outputCapture();
-  assert.equal(await runImportCli({argv,input:Readable.from(['IMPORT\\n']),output:confirmed.stream}),0);
+  assert.equal(await runImportCli({argv,input:Readable.from(['IMPORT\n']),output:confirmed.stream}),0);
   const manifest=JSON.parse(await readFile(path.join(library,'manifest.json'),'utf8'));
   assert.equal(manifest.assets.length,1);
   assert.equal(manifest.assets[0].metadata.name,'雨声');
