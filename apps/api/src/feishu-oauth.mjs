@@ -1,1 +1,50 @@
-aW1wb3J0IHsgY3JlYXRlSGFzaCwgcmFuZG9tQnl0ZXMgfSBmcm9tICdub2RlOmNyeXB0byc7Cgpjb25zdCBUT0tFTl9FTkRQT0lOVCA9ICdodHRwczovL2FjY291bnRzLmZlaXNodS5jbi9vYXV0aC92My90b2tlbic7CmNvbnN0IEFVVEhPUklaRV9FTkRQT0lOVCA9ICdodHRwczovL2FjY291bnRzLmZlaXNodS5jbi9vcGVuLWFwaXMvYXV0aGVuL3YxL2F1dGhvcml6ZSc7CmNvbnN0IFVTRVJfSU5GT19FTkRQT0lOVCA9ICdodHRwczovL29wZW4uZmVpc2h1LmNuL29wZW4tYXBpcy9hdXRoZW4vdjEvdXNlcl9pbmZvJzsKCi8vIHN0YXRlU3RvcmUgbXVzdCBhdG9taWNhbGx5IGNvbnN1bWUgdGhlIGhhc2ggYW5kIGJpbmQgaXQgdG8gYW4gZXhpc3RpbmcgYnJvd3NlciBzZXNzaW9uLgpleHBvcnQgYXN5bmMgZnVuY3Rpb24gc3RhcnRVc2VyQXV0aG9yaXphdGlvbih7c3RhdGVTdG9yZSwgc2Vzc2lvbklkLCBjbGllbnRJZCwgcmVkaXJlY3RVcmksIHNjb3Blc30pIHsKICBpZiAoIXNlc3Npb25JZCB8fCAhY2xpZW50SWQgfHwgIXJlZGlyZWN0VXJpIHx8ICFBcnJheS5pc0FycmF5KHNjb3BlcykgfHwgIXNjb3Blcy5pbmNsdWRlcygnb2ZmbGluZV9hY2Nlc3MnKSkgdGhyb3cgbmV3IEVycm9yKCdJbnZhbGlkIE9BdXRoIGNvbmZpZ3VyYXRpb24nKTsKICBjb25zdCBzdGF0ZSA9IHJhbmRvbUJ5dGVzKDMyKS50b1N0cmluZygnYmFzZTY0dXJsJyk7CiAgY29uc3QgdmVyaWZpZXIgPSByYW5kb21CeXRlcygzMikudG9TdHJpbmcoJ2Jhc2U2NHVybCcpOwogIGNvbnN0IGhhc2ggPSBjcmVhdGVIYXNoKCdzaGEyNTYnKS51cGRhdGUoc3RhdGUpLmRpZ2VzdCgnaGV4Jyk7CiAgYXdhaXQgc3RhdGVTdG9yZS5jcmVhdGUoe2hhc2gsIHNlc3Npb25JZCwgdmVyaWZpZXIsIGV4cGlyZXNBdDogRGF0ZS5ub3coKSArIDMwMDAwMH0pOwogIGNvbnN0IHVybCA9IG5ldyBVUkwoQVVUSE9SSVpFX0VORFBPSU5UKTsKICAvLyBQS0NFIGlzIGludGVudGlvbmFsbHkgbm90IHVzZWQ6IGluIHJlYWwtZW52aXJvbm1lbnQgdGVzdGluZyBGZWlzaHUncwogIC8vIGF1dGhvcml6ZSByZWRpcmVjdCBjaGFpbiBkcm9wcGVkIGNvZGVfY2hhbGxlbmdlLCBhbmQgdGhlIHYzIHRva2VuCiAgLy8gZW5kcG9pbnQgdGhlbiByZWplY3RlZCB0aGUgZXhjaGFuZ2Ugd2l0aCAyMDA0OSAoaW52YWxpZF9ncmFudCkuIFRoaXMgaXMKICAvLyBhIGNvbmZpZGVudGlhbCBzZXJ2ZXItc2lkZSBjbGllbnQ7IHRoZSBjbGllbnQgc2VjcmV0IGF1dGhlbnRpY2F0ZXMgdGhlCiAgLy8gZXhjaGFuZ2UuIFRoZSB2ZXJpZmllciBpcyBzdGlsbCBnZW5lcmF0ZWQgYW5kIHN0b3JlZCB3aXRoIHRoZSBzdGF0ZSBzbwogIC8vIFBLQ0UgY2FuIGJlIHJlLWVuYWJsZWQgd2l0aG91dCBhIHNjaGVtYSBjaGFuZ2UuCiAgZm9yIChjb25zdCBba2V5LHZhbHVlXSBvZiBPYmplY3QuZW50cmllcyh7Y2xpZW50X2lkOmNsaWVudElkLHJlZGlyZWN0X3VyaTpyZWRpcmVjdFVyaSxyZXNwb25zZV90eXBlOidjb2RlJyxzY29wZTpzY29wZXMuam9pbignICcpLHN0YXRlfSkpIHVybC5zZWFyY2hQYXJhbXMuc2V0KGtleSx2YWx1ZSk7CiAgcmV0dXJuIHVybC50b1N0cmluZygpOwp9Cgphc3luYyBmdW5jdGlvbiB0b2tlblJlcXVlc3QoZmV0Y2hJbXBsLCBib2R5KSB7CiAgY29uc3QgcmVzcG9uc2UgPSBhd2FpdCBmZXRjaEltcGwoVE9LRU5fRU5EUE9JTlQse21ldGhvZDonUE9TVCcsaGVhZGVyczp7J0NvbnRlbnQtVHlwZSc6J2FwcGxpY2F0aW9uL2pzb247IGNoYXJzZXQ9dXRmLTgnfSxib2R5OkpTT04uc3RyaW5naWZ5KGJvZHkpfSk7CiAgY29uc3QganNvbiA9IGF3YWl0IHJlc3BvbnNlLmpzb24oKS5jYXRjaCgoKT0+KHt9KSk7CiAgaWYgKCFyZXNwb25zZS5vayB8fCBqc29uLmNvZGUgIT09IDAgfHwgdHlwZW9mIGpzb24uYWNjZXNzX3Rva2VuICE9PSAnc3RyaW5nJyB8fCB0eXBlb2YganNvbi5yZWZyZXNoX3Rva2VuICE9PSAnc3RyaW5nJyB8fCAhTnVtYmVyLmlzRmluaXRlKGpzb24uZXhwaXJlc19pbikgfHwganNvbi5leHBpcmVzX2luIDw9IDApIHRocm93IG5ldyBFcnJvcignRmVpc2h1IHVzZXIgdG9rZW4gcmVxdWVzdCBmYWlsZWQnKTsKICByZXR1cm4geyBhY2Nlc3NUb2tlbjpqc29uLmFjY2Vzc190b2tlbiwgcmVmcmVzaFRva2VuOmpzb24ucmVmcmVzaF90b2tlbiwgZXhwaXJlc0luOmpzb24uZXhwaXJlc19pbiwgcmVmcmVzaEV4cGlyZXNJbjpqc29uLnJlZnJlc2hfdG9rZW5fZXhwaXJlc19pbiA/PyBudWxsLCBzY29wZTpqc29uLnNjb3BlID8/ICcnIH07Cn0KCmV4cG9ydCBhc3luYyBmdW5jdGlvbiBjb21wbGV0ZVVzZXJBdXRob3JpemF0aW9uKHtzdGF0ZVN0b3JlLHNlc3Npb25JZCxzdGF0ZSxjb2RlLGNsaWVudElkLGNsaWVudFNlY3JldCxyZWRpcmVjdFVyaSxhcHBNb2RlPSdjdXN0b21fYXBwJyxmZXRjaEltcGw9ZmV0Y2h9KSB7CiAgaWYgKCFbJ2N1c3RvbV9hcHAnLCdzdG9yZV9hcHAnXS5pbmNsdWRlcyhhcHBNb2RlKSkgdGhyb3cgbmV3IEVycm9yKCdJbnZhbGlkIEZlaXNodSBhcHAgbW9kZScpOwogIGlmICghc2Vzc2lvbklkIHx8IHR5cGVvZiBzdGF0ZSAhPT0gJ3N0cmluZycgfHwgIS9eW0EtWmEtejAtOV8tXXs0M30kLy50ZXN0KHN0YXRlKSB8fCAhY29kZSkgdGhyb3cgbmV3IEVycm9yKCdJbnZhbGlkIE9BdXRoIGNhbGxiYWNrJyk7CiAgY29uc3QgaGFzaD1jcmVhdGVIYXNoKCdzaGEyNTYnKS51cGRhdGUoc3RhdGUpLmRpZ2VzdCgnaGV4Jyk7CiAgY29uc3QgYXR0ZW1wdD1hd2FpdCBzdGF0ZVN0b3JlLmNvbnN1bWUoe2hhc2gsc2Vzc2lvbklkLG5vdzpEYXRlLm5vdygpfSk7CiAgaWYgKCFhdHRlbXB0KSB0aHJvdyBuZXcgRXJyb3IoJ0ludmFsaWQgb3IgZXhwaXJlZCBPQXV0aCBzdGF0ZScpOwogIGNvbnN0IHRva2Vucz1hd2FpdCB0b2tlblJlcXVlc3QoZmV0Y2hJbXBsLHtncmFudF90eXBlOidhdXRob3JpemF0aW9uX2NvZGUnLGNsaWVudF9pZDpjbGllbnRJZCxjbGllbnRfc2VjcmV0OmNsaWVudFNlY3JldCxjb2RlLHJlZGlyZWN0X3VyaTpyZWRpcmVjdFVyaX0pOwogIGNvbnN0IHJlc3BvbnNlPWF3YWl0IGZldGNoSW1wbChVU0VSX0lORk9fRU5EUE9JTlQse2hlYWRlcnM6e0F1dGhvcml6YXRpb246YEJlYXJlciAke3Rva2Vucy5hY2Nlc3NUb2tlbn1gfX0pOwogIGNvbnN0IGpzb249YXdhaXQgcmVzcG9uc2UuanNvbigpLmNhdGNoKCgpPT4oe30pKTsKICBpZiAoIXJlc3BvbnNlLm9rIHx8IGpzb24uY29kZSAhPT0gMCB8fCB0eXBlb2YganNvbi5kYXRhPy5vcGVuX2lkICE9PSAnc3RyaW5nJyB8fCAhanNvbi5kYXRhLm9wZW5faWQgfHwgKGpzb24uZGF0YS50ZW5hbnRfa2V5ICE9IG51bGwgJiYgKHR5cGVvZiBqc29uLmRhdGEudGVuYW50X2tleSAhPT0gJ3N0cmluZycgfHwgIWpzb24uZGF0YS50ZW5hbnRfa2V5KSkgfHwgKGFwcE1vZGUgPT09ICdjdXN0b21fYXBwJyAmJiAhanNvbi5kYXRhLnRlbmFudF9rZXkpKSB0aHJvdyBuZXcgRXJyb3IoJ1VuYWJsZSB0byByZWFkIEZlaXNodSB1c2VyIGlkZW50aXR5Jyk7CiAgcmV0dXJuIHt0b2tlbnMsIHVzZXI6e29wZW5JZDpqc29uLmRhdGEub3Blbl9pZCx0ZW5hbnRLZXk6anNvbi5kYXRhLnRlbmFudF9rZXkgPz8gbnVsbCxuYW1lOmpzb24uZGF0YS5uYW1lID8/ICcnfX07Cn0KCi8vIENhbGxlciBtdXN0IHNlcmlhbGl6ZSBieSBjcmVkZW50aWFsIGFjcm9zcyBhbGwgcHJvY2Vzc2VzIGFuZCBhdG9taWNhbGx5IHJlcGxhY2UgdGhlCi8vIGVuY3J5cHRlZCBhY2Nlc3MgQU5EIHJlZnJlc2ggdG9rZW4uIEFuIGFtYmlndW91cyByZXNwb25zZSByZXF1aXJlcyByZWF1dGhvcml6YXRpb246Ci8vIEZlaXNodSBpbnZhbGlkYXRlcyB0aGUgb2xkIHJlZnJlc2ggdG9rZW4gaW1tZWRpYXRlbHkgb24gc3VjY2Vzc2Z1bCByb3RhdGlvbi4KZXhwb3J0IGFzeW5jIGZ1bmN0aW9uIHJlZnJlc2hVc2VyVG9rZW5zKHtjbGllbnRJZCxjbGllbnRTZWNyZXQscmVmcmVzaFRva2VuLGZldGNoSW1wbD1mZXRjaH0pIHsKICByZXR1cm4gdG9rZW5SZXF1ZXN0KGZldGNoSW1wbCx7Z3JhbnRfdHlwZToncmVmcmVzaF90b2tlbicsY2xpZW50X2lkOmNsaWVudElkLGNsaWVudF9zZWNyZXQ6Y2xpZW50U2VjcmV0LHJlZnJlc2hfdG9rZW46cmVmcmVzaFRva2VufSk7Cn0K
+import { createHash, randomBytes } from 'node:crypto';
+
+const TOKEN_ENDPOINT = 'https://accounts.feishu.cn/oauth/v3/token';
+const AUTHORIZE_ENDPOINT = 'https://accounts.feishu.cn/open-apis/authen/v1/authorize';
+const USER_INFO_ENDPOINT = 'https://open.feishu.cn/open-apis/authen/v1/user_info';
+
+// stateStore must atomically consume the hash and bind it to an existing browser session.
+export async function startUserAuthorization({stateStore, sessionId, clientId, redirectUri, scopes}) {
+  if (!sessionId || !clientId || !redirectUri || !Array.isArray(scopes) || !scopes.includes('offline_access')) throw new Error('Invalid OAuth configuration');
+  const state = randomBytes(32).toString('base64url');
+  const verifier = randomBytes(32).toString('base64url');
+  const hash = createHash('sha256').update(state).digest('hex');
+  await stateStore.create({hash, sessionId, verifier, expiresAt: Date.now() + 300000});
+  const url = new URL(AUTHORIZE_ENDPOINT);
+  // PKCE is intentionally not used: in real-environment testing Feishu's
+  // authorize redirect chain dropped code_challenge, and the v3 token
+  // endpoint then rejected the exchange with 20049 (invalid_grant). This is
+  // a confidential server-side client; the client secret authenticates the
+  // exchange. The verifier is still generated and stored with the state so
+  // PKCE can be re-enabled without a schema change.
+  for (const [key,value] of Object.entries({client_id:clientId,redirect_uri:redirectUri,response_type:'code',scope:scopes.join(' '),state})) url.searchParams.set(key,value);
+  return url.toString();
+}
+
+async function tokenRequest(fetchImpl, body) {
+  const response = await fetchImpl(TOKEN_ENDPOINT,{method:'POST',headers:{'Content-Type':'application/json; charset=utf-8'},body:JSON.stringify(body)});
+  const json = await response.json().catch(()=>({}));
+  if (!response.ok || json.code !== 0 || typeof json.access_token !== 'string' || typeof json.refresh_token !== 'string' || !Number.isFinite(json.expires_in) || json.expires_in <= 0) throw new Error('Feishu user token request failed');
+  return { accessToken:json.access_token, refreshToken:json.refresh_token, expiresIn:json.expires_in, refreshExpiresIn:json.refresh_token_expires_in ?? null, scope:json.scope ?? '' };
+}
+
+export async function completeUserAuthorization({stateStore,sessionId,state,code,clientId,clientSecret,redirectUri,appMode='custom_app',fetchImpl=fetch}) {
+  if (!['custom_app','store_app'].includes(appMode)) throw new Error('Invalid Feishu app mode');
+  if (!sessionId || typeof state !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(state) || !code) throw new Error('Invalid OAuth callback');
+  const hash=createHash('sha256').update(state).digest('hex');
+  const attempt=await stateStore.consume({hash,sessionId,now:Date.now()});
+  if (!attempt) throw new Error('Invalid or expired OAuth state');
+  const tokens=await tokenRequest(fetchImpl,{grant_type:'authorization_code',client_id:clientId,client_secret:clientSecret,code,redirect_uri:redirectUri});
+  const response=await fetchImpl(USER_INFO_ENDPOINT,{headers:{Authorization:`Bearer ${tokens.accessToken}`}});
+  const json=await response.json().catch(()=>({}));
+  if (!response.ok || json.code !== 0 || typeof json.data?.open_id !== 'string' || !json.data.open_id || (json.data.tenant_key != null && (typeof json.data.tenant_key !== 'string' || !json.data.tenant_key)) || (appMode === 'custom_app' && !json.data.tenant_key)) throw new Error('Unable to read Feishu user identity');
+  return {tokens, user:{openId:json.data.open_id,tenantKey:json.data.tenant_key ?? null,name:json.data.name ?? ''}};
+}
+
+// Caller must serialize by credential across all processes and atomically replace the
+// encrypted access AND refresh token. An ambiguous response requires reauthorization:
+// Feishu invalidates the old refresh token immediately on successful rotation.
+export async function refreshUserTokens({clientId,clientSecret,refreshToken,fetchImpl=fetch}) {
+  return tokenRequest(fetchImpl,{grant_type:'refresh_token',client_id:clientId,client_secret:clientSecret,refresh_token:refreshToken});
+}
