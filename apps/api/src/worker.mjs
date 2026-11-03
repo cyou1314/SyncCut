@@ -81,7 +81,7 @@ async function compensationLoop() {
 
 process.stdout.write("SyncCut worker started\\n");
 compensationLoop();
-compensationTimer = setInterval(compensationLoop, Math.max(1, Number(process.env.WORKER_COMPENSATION_MINUTES ?? 15)) * 60 * 1000);
+if (compensationMinutes > 0) compensationTimer = setInterval(compensationLoop, compensationMinutes * 60 * 1000);
 const mainLoop = loop();
 
 let shuttingDown = false;
