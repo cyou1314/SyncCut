@@ -20,8 +20,18 @@ test("Mac device pairing is one-time, tenant-scoped, and revocable", {
   });
   let server;
   try {
-    for (const file of (await readdir(new URL("../migrations/", import.meta.url))).filter((f) => f.endsWith(".sql")).sort()) {
-      await pool.query(await readFile(new URL(`../migrations/${file}`, import.meta.url), "utf8"));
+    const migrations = (await readdir(new URL("../migrations/", import.meta.url))).filter((f) => f.endsWith(".sql")).sort();
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        for (const file of migrations) {
+          await pool.query(await readFile(new URL(`../migrations/${file}`, import.meta.url), "utf8"));
+        }
+        break;
+      } catch (error) {
+        // Parallel test schemas can race while creating the shared pgcrypto extension.
+        if (error.code !== "23505" || attempt === 2) throw error;
+        await new Promise((resolve) => setTimeout(resolve, 300 * (attempt + 1)));
+      }
     }
     const tenant = (await pool.query("insert into tenants (display_name) values ('Device Team') returning id")).rows[0].id;
     const member = (await pool.query(
