@@ -42,12 +42,17 @@ final class AgentViewModel: ObservableObject {
     @Published private(set) var playingVersionKey: String?
 
     private let importer = LocalImportService()
+    private let libraryBookmarkKey = "SyncCut.libraryBookmark.v1"
     private var audioPlayer: AVAudioPlayer?
     private var audioAccessGranted = false
 
     enum PickerTarget: String, Identifiable {
         case table, audio, library
         var id: String { rawValue }
+    }
+
+    init() {
+        restoreLibraryBookmark()
     }
 
     var manifestURL: URL? { libraryURL?.appendingPathComponent("manifest.json") }
@@ -97,6 +102,11 @@ final class AgentViewModel: ObservableObject {
     func refreshLibrary() {
         guard let libraryURL, let manifestURL else {
             libraryAssets = []
+            return
+        }
+        guard FileManager.default.fileExists(atPath: libraryURL.path) else {
+            libraryAssets = []
+            errors = ["上次选择的素材库目录已不存在，请重新选择。"]
             return
         }
         let granted = libraryURL.startAccessingSecurityScopedResource()
@@ -250,7 +260,43 @@ final class AgentViewModel: ObservableObject {
             stopPlayback()
             libraryURL = url
             preview = nil
+            do {
+                let bookmark = try url.bookmarkData(
+                    options: [.withSecurityScope],
+                    includingResourceValuesForKeys: nil,
+                    relativeTo: nil
+                )
+                UserDefaults.standard.set(bookmark, forKey: libraryBookmarkKey)
+            } catch {
+                errors = ["无法保存素材库访问权限：\\(error.localizedDescription)"]
+            }
             refreshLibrary()
+        }
+    }
+
+    private func restoreLibraryBookmark() {
+        guard let bookmark = UserDefaults.standard.data(forKey: libraryBookmarkKey) else { return }
+        var isStale = false
+        do {
+            let url = try URL(
+                resolvingBookmarkData: bookmark,
+                options: [.withSecurityScope],
+                relativeTo: nil,
+                bookmarkDataIsStale: &isStale
+            )
+            libraryURL = url
+            if isStale {
+                let refreshed = try url.bookmarkData(
+                    options: [.withSecurityScope],
+                    includingResourceValuesForKeys: nil,
+                    relativeTo: nil
+                )
+                UserDefaults.standard.set(refreshed, forKey: libraryBookmarkKey)
+            }
+            refreshLibrary()
+        } catch {
+            UserDefaults.standard.removeObject(forKey: libraryBookmarkKey)
+            errors = ["无法恢复上次素材库访问权限，请重新选择目录。"]
         }
     }
 
