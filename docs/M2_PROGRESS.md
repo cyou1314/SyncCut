@@ -41,3 +41,20 @@
 - [ ] Webhook inbox 到 sync job 的原子交接，避免 Worker 在 processing 状态崩溃后遗留事件。
 - [ ] Worker lease fencing，防止过期 Worker 继续完成或覆盖任务。
 - [ ] 上述补强需在真实部署环境迁移并验收后勾选。
+
+## M2.2 生产可靠性补强（PR #2 后续提交）
+
+- [x] Webhook 密钥创建后一次性展示、短期加密暂存和轮换 API/UI（代码与 CI 已验证；尚待服务器迁移和真实飞书工作流配置验收）。
+- [x] Webhook inbox 与同步任务在同一 PostgreSQL 事务内原子交接，避免 Worker 崩溃留下永久 processing 事件（代码与 CI 已验证；尚待服务器部署）。
+- [x] Worker 任务租约 fencing，过期 Worker 不能继续开始、续租、失败或完成任务（代码与 CI 已验证；尚待服务器部署）。
+- [ ] 在生产服务器应用 0010 迁移、更新 API/Worker、验证旧 processing 事件恢复及密钥轮换。
+
+## M2.3 设备连接（开发中）
+
+- [x] 租户范围的一次性 Mac 配对码（哈希存储、10 分钟有效、一次使用）。
+- [x] Mac 设备 Token 哈希存储、身份查询、心跳和独立撤销。
+- [x] Web 控制台设备列表、生成配对码和撤销设备。
+- [x] macOS Agent 配对界面与 Keychain 设备凭证存储（CI 待最终通过；真实 Mac 配对待验收）。
+- [ ] 设备任务拉取、租约心跳和任务结果回传。
+- [ ] 对象存储短期签名下载 URL 分发。
+- [ ] 真实 Mac 设备配对与断网恢复验收。

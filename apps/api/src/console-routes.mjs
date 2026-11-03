@@ -89,7 +89,7 @@ export function createConsoleRoutes({pool,appId,appSecret,encryptionKey,publicOr
       if(req.method==='POST' && url.pathname==='/api/agent/pair') {
         if(!allowPairingAttempt(req)) return send(res,429,{error:'pairing_rate_limited'}),true;
         const body=await readJsonBody(req);
-        const code=typeof body.code==='string'?body.code.toUpperCase().replace(/[^A-F0-9]/g,''):'';
+        const code=typeof body.code==='string'?body.code.toUpperCase().replace(/[-\\s]/g,''):'';
         const deviceName=typeof body.device_name==='string'?body.device_name.trim():'';
         const appVersion=validOptionalText(body.app_version,64);
         const macosVersion=validOptionalText(body.macos_version,64);

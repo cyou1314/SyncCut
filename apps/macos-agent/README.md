@@ -75,3 +75,14 @@ GitHub Actions 会在 macOS runner 上执行构建和 Swift 单元测试；API �
 - 独立签名/公证的可分发 .app 安装包。
 
 飞书 App Secret 和访问 Token 不应存放在 Mac 助手中。Mac 端后续只持有可撤销的 SyncCut 设备令牌。
+
+## 云端设备配对（M2.3）
+
+1. 在 SyncCut Web 控制台「Mac 设备」区域生成一次性配对码（10 分钟有效）。
+2. 在菜单栏助手切换到「设备」页面。
+3. 填入正式云端 API HTTPS 地址、配对码和设备名称。
+4. 点击「配对这台 Mac」。
+
+设备 Token 仅在配对响应中返回一次，并保存到 macOS 钥匙串；不写入 UserDefaults、素材清单或日志。设备可在 Web 控制台单独撤销。开发环境允许使用 http://127.0.0.1 / localhost；远程服务器必须使用 HTTPS。
+
+当前 M2.3 已完成配对、设备身份查询、心跳和撤销 API；任务拉取、签名下载与 Mac 执行结果回传仍在开发中。
