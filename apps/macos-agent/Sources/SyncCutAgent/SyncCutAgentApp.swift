@@ -54,6 +54,7 @@ final class AgentViewModel: ObservableObject {
     private let libraryBookmarkKey = "SyncCut.libraryBookmark.v1"
     private var audioPlayer: AVAudioPlayer?
     private var audioAccessGranted = false
+    private var cloudPollingTask: Task<Void, Never>?
 
     enum PickerTarget: String, Identifiable {
         case table, audio, library
@@ -345,6 +346,7 @@ final class AgentViewModel: ObservableObject {
                 status = "已连接云端"
                 pairingCode = ""
                 cloudMessage = "设备配对成功。设备凭证已保存到 macOS 钥匙串。"
+                startCloudPolling()
                 try? await devicePairingService.heartbeat(
                     server: server,
                     token: pairedResult.deviceToken,
@@ -376,6 +378,7 @@ final class AgentViewModel: ObservableObject {
                 cloudDevice = identity
                 paired = true
                 status = "已连接云端"
+                startCloudPolling()
                 try? await devicePairingService.heartbeat(
                     server: server,
                     token: token,
@@ -402,34 +405,54 @@ final class AgentViewModel: ObservableObject {
     }
 
     func runNextCloudJob() {
-        guard !isRunningCloudJob else { return }
-        let server = cloudOrigin.trimmingCharacters(in: .whitespacesAndNewlines)
-        isRunningCloudJob = true
-        cloudMessage = "正在检查云端素材任务…"
-        Task {
-            defer { isRunningCloudJob = false }
-            do {
-                guard let token = try deviceTokenStore.load() else {
-                    throw NSError(domain: "SyncCut.AgentJob", code: 2, userInfo: [
-                        NSLocalizedDescriptionKey: "设备凭证不存在，请重新配对。"
-                    ])
+        Task { await processNextCloudJob(showIdleMessage: true) }
+    }
+
+    private func startCloudPolling() {
+        guard cloudPollingTask == nil else { return }
+        cloudPollingTask = Task {
+            while !Task.isCancelled {
+                if paired && !isRunningCloudJob {
+                    await processNextCloudJob(showIdleMessage: false)
                 }
-                let cloudDirectory = URL(fileURLWithPath: cachePath, isDirectory: true)
-                    .appendingPathComponent("CloudAssets", isDirectory: true)
-                let cache = CloudAssetCache(directory: cloudDirectory)
-                let runner = AgentJobRunner(service: devicePairingService, cache: cache)
-                guard let result = try await runner.runNext(server: server, token: token) else {
-                    cloudMessage = "目前没有待处理的云端素材任务。"
-                    return
-                }
-                cloudMessage = "任务完成：\(result.assetCount) 个素材已下载并通过 SHA-256 校验；\(result.reusedCount) 个文件复用了本地缓存。素材已放入 CloudAssets，剪映导入将在下一阶段接入。"
-            } catch {
-                cloudMessage = error.localizedDescription
+                try? await Task.sleep(nanoseconds: 10_000_000_000)
             }
         }
     }
 
+    private func stopCloudPolling() {
+        cloudPollingTask?.cancel()
+        cloudPollingTask = nil
+    }
+
+    private func processNextCloudJob(showIdleMessage: Bool) async {
+        guard !isRunningCloudJob else { return }
+        let server = cloudOrigin.trimmingCharacters(in: .whitespacesAndNewlines)
+        isRunningCloudJob = true
+        if showIdleMessage { cloudMessage = "正在检查云端素材任务…" }
+        defer { isRunningCloudJob = false }
+        do {
+            guard let token = try deviceTokenStore.load() else {
+                throw NSError(domain: "SyncCut.AgentJob", code: 2, userInfo: [
+                    NSLocalizedDescriptionKey: "设备凭证不存在，请重新配对。"
+                ])
+            }
+            let cloudDirectory = URL(fileURLWithPath: cachePath, isDirectory: true)
+                .appendingPathComponent("CloudAssets", isDirectory: true)
+            let cache = CloudAssetCache(directory: cloudDirectory)
+            let runner = AgentJobRunner(service: devicePairingService, cache: cache)
+            guard let result = try await runner.runNext(server: server, token: token) else {
+                if showIdleMessage { cloudMessage = "目前没有待处理的云端素材任务。" }
+                return
+            }
+            cloudMessage = "任务完成：\\(result.assetCount) 个素材已下载并通过 SHA-256 校验；\\(result.reusedCount) 个文件复用了本地缓存。素材已放入 CloudAssets，剪映导入将在下一阶段接入。"
+        } catch {
+            cloudMessage = error.localizedDescription
+        }
+    }
+
     func disconnectCloudDevice() {
+        stopCloudPolling()
         Task {
             var remoteRevoked = false
             do {
@@ -596,6 +619,7 @@ struct AgentMenuView: View {
                 .buttonStyle(.borderedProminent)
                 .disabled(model.isRunningCloudJob)
                 Button("解除本机配对") { model.disconnectCloudDevice() }
+                    .disabled(model.isRunningCloudJob)
                     .buttonStyle(.bordered)
             } else {
                 SecureField("输入飞书控制台生成的 16 位一次性配对码", text: $model.pairingCode)
