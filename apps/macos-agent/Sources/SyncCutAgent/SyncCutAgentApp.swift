@@ -422,7 +422,7 @@ final class AgentViewModel: ObservableObject {
                     cloudMessage = "目前没有待处理的云端素材任务。"
                     return
                 }
-                cloudMessage = "任务完成：\\(result.assetCount) 个素材已下载并通过 SHA-256 校验；\\(result.reusedCount) 个文件复用了本地缓存。素材已放入 CloudAssets，剪映导入将在下一阶段接入。"
+                cloudMessage = "任务完成：\(result.assetCount) 个素材已下载并通过 SHA-256 校验；\(result.reusedCount) 个文件复用了本地缓存。素材已放入 CloudAssets，剪映导入将在下一阶段接入。"
             } catch {
                 cloudMessage = error.localizedDescription
             }
@@ -447,7 +447,7 @@ final class AgentViewModel: ObservableObject {
                 status = "尚未配对"
                 cloudMessage = remoteRevoked ? "设备已解除配对。" : "本机凭证已清除。若设备仍显示在控制台，请手动撤销。"
             } catch {
-                cloudMessage = "无法清除钥匙串凭证：\\(error.localizedDescription)"
+                cloudMessage = "无法清除钥匙串凭证：\(error.localizedDescription)"
             }
         }
     }
@@ -576,11 +576,11 @@ struct AgentMenuView: View {
             if let device = model.cloudDevice {
                 Divider()
                 Text(device.deviceName).font(.caption.weight(.semibold))
-                Text("设备 ID：\\(device.deviceId)")
+                Text("设备 ID：\(device.deviceId)")
                     .font(.system(size: 10, design: .monospaced))
                     .foregroundStyle(.secondary)
                     .textSelection(.enabled)
-                Text("工作区：\\(device.tenantId)")
+                Text("工作区：\(device.tenantId)")
                     .font(.system(size: 10, design: .monospaced))
                     .foregroundStyle(.secondary)
                     .textSelection(.enabled)

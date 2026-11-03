@@ -238,7 +238,7 @@ final class DevicePairingService {
     func heartbeatJob(server: String, token: String, jobId: String) async throws {
         let _: [String: Bool] = try await send(
             server: server,
-            path: "api/agent/jobs/\\(jobId)/heartbeat",
+            path: "api/agent/jobs/\(jobId)/heartbeat",
             method: "POST",
             body: Optional<HeartbeatRequest>.none,
             token: token,
@@ -249,7 +249,7 @@ final class DevicePairingService {
     func completeJob(server: String, token: String, jobId: String, result: AgentJobResult) async throws {
         let _: [String: Bool] = try await send(
             server: server,
-            path: "api/agent/jobs/\\(jobId)/complete",
+            path: "api/agent/jobs/\(jobId)/complete",
             method: "POST",
             body: CompleteJobRequest(result: result),
             token: token,
@@ -260,7 +260,7 @@ final class DevicePairingService {
     func failJob(server: String, token: String, jobId: String, message: String) async throws {
         let _: [String: Bool] = try await send(
             server: server,
-            path: "api/agent/jobs/\\(jobId)/fail",
+            path: "api/agent/jobs/\(jobId)/fail",
             method: "POST",
             body: FailJobRequest(error: String(message.prefix(1000))),
             token: token,
