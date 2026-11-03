@@ -69,6 +69,7 @@ test("task queue: failure retries with backoff, expired leases are reaped", { sk
     const queue = createTaskQueue(pool, { workerId: "w1" });
     const { id } = await queue.enqueue({ tenantId: tenant, jobType: "full_sync", idempotencyKey: "k2", maxAttempts: 2 });
     const job = await queue.leaseNext({ jobTypes: ["full_sync"] });
+    await queue.begin(job.id);
     const retry = await queue.fail(job.id, new Error("boom"), { baseBackoffSeconds: 1 });
     assert.equal(retry.retried, true);
     let row = (await pool.query("select status, attempts from sync_jobs where id = $1", [id])).rows[0];
