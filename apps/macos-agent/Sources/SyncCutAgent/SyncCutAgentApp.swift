@@ -56,7 +56,15 @@ final class AgentViewModel: ObservableObject {
     func runPreview() {
         guard let tableURL, let audioURL, let manifestURL else { return }
         isWorking = true; preview = nil; errors = []; resultText = ""
+        let libraryURL = self.libraryURL!
         Task.detached(priority: .userInitiated) {
+            let scopedURLs = [tableURL, audioURL, libraryURL]
+            let accessGranted = scopedURLs.map { $0.startAccessingSecurityScopedResource() }
+            defer {
+                for (url, granted) in zip(scopedURLs, accessGranted) where granted {
+                    url.stopAccessingSecurityScopedResource()
+                }
+            }
             do {
                 let value = try self.importer.preview(tableURL: tableURL, audioDirectory: audioURL, manifestURL: manifestURL)
                 await MainActor.run { self.preview = value; self.isWorking = false }
@@ -70,6 +78,13 @@ final class AgentViewModel: ObservableObject {
         guard let preview, let libraryURL, let manifestURL else { return }
         isWorking = true; errors = []
         Task.detached(priority: .userInitiated) {
+            let scopedURLs = [libraryURL]
+            let accessGranted = scopedURLs.map { $0.startAccessingSecurityScopedResource() }
+            defer {
+                for (url, granted) in zip(scopedURLs, accessGranted) where granted {
+                    url.stopAccessingSecurityScopedResource()
+                }
+            }
             do {
                 let result = try self.importer.apply(preview, libraryDirectory: libraryURL, manifestURL: manifestURL)
                 await MainActor.run {
