@@ -181,8 +181,9 @@ test("Mac device pairing is one-time, tenant-scoped, and revocable", {
     response = await fetch(root + "/api/agent/jobs/next", {
       headers: { authorization: `Bearer ${secondDevice.deviceToken}`, "x-synccut-agent-session": secondAgentSession },
     });
-    assert.equal(response.status, 200);
-    assert.equal((await response.json()).job, null, "a different paired Mac must not lease another device's job");
+    const secondPollBody = await response.json();
+    assert.equal(response.status, 200, JSON.stringify(secondPollBody));
+    assert.equal(secondPollBody.job, null, "a different paired Mac must not lease another device's job");
 
     response = await fetch(root + "/api/agent/jobs/next", {
       headers: { authorization: `Bearer ${paired.deviceToken}`, "x-synccut-agent-session": firstAgentSession },
