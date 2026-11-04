@@ -28,7 +28,6 @@ test("worker entrypoint boots with valid configuration", { timeout: 10000 }, asy
   let stderr = "";
   child.stdout.setEncoding("utf8");
   child.stderr.setEncoding("utf8");
-  child.stdout.on("data", (chunk) => { stdout += chunk; });
   child.stderr.on("data", (chunk) => { stderr += chunk; });
 
   const startup = new Promise((resolve, reject) => {
@@ -43,7 +42,7 @@ test("worker entrypoint boots with valid configuration", { timeout: 10000 }, asy
       callback(value);
     };
     const onExit = (code, signal) => finish(reject, new Error(
-      \`Worker exited before startup (code=\${code}, signal=\${signal}). stdout=\${stdout} stderr=\${stderr}\`
+      `Worker exited before startup (code=${code}, signal=${signal}). stdout=${stdout} stderr=${stderr}`
     ));
     const onError = (error) => finish(reject, error);
     const onData = (chunk) => {
@@ -51,7 +50,7 @@ test("worker entrypoint boots with valid configuration", { timeout: 10000 }, asy
       if (stdout.includes("SyncCut worker started")) finish(resolve);
     };
     const timer = setTimeout(() => finish(reject, new Error(
-      \`Worker did not report startup within 5 seconds. stdout=\${stdout} stderr=\${stderr}\`
+      `Worker did not report startup within 5 seconds. stdout=${stdout} stderr=${stderr}`
     )), 5000);
     child.on("exit", onExit);
     child.on("error", onError);
@@ -62,7 +61,7 @@ test("worker entrypoint boots with valid configuration", { timeout: 10000 }, asy
   try {
     await startup;
     await new Promise((resolve) => setTimeout(resolve, 250));
-    assert.equal(child.exitCode, null, \`Worker exited after printing startup. stderr=\${stderr}\`);
+    assert.equal(child.exitCode, null, `Worker exited after printing startup. stderr=${stderr}`);
   } catch (error) {
     startupError = error;
   } finally {
@@ -76,5 +75,5 @@ test("worker entrypoint boots with valid configuration", { timeout: 10000 }, asy
     }
   }
   if (startupError) throw startupError;
-  assert.equal(child.exitCode, 0, \`Worker did not shut down cleanly. stderr=\${stderr}\`);
+  assert.equal(child.exitCode, 0, `Worker did not shut down cleanly. stderr=${stderr}`);
 });
