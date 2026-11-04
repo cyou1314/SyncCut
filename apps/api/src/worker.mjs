@@ -20,6 +20,17 @@ for (const name of required) {
   if (!process.env[name]) throw new Error(`${name} is required for the worker.`);
 }
 
+const pollMs = Number(process.env.WORKER_POLL_MS ?? 3000);
+const compensationMinutes = Number(process.env.WORKER_COMPENSATION_MINUTES ?? 15);
+const maxAttachmentBytes = Number(process.env.WORKER_MAX_ATTACHMENT_BYTES ?? 256 * 1024 * 1024);
+if (!Number.isInteger(pollMs) || pollMs < 250) throw new Error("WORKER_POLL_MS must be an integer of at least 250.");
+if (!Number.isInteger(compensationMinutes) || compensationMinutes < 0 || compensationMinutes > 1440) {
+  throw new Error("WORKER_COMPENSATION_MINUTES must be an integer between 0 and 1440.");
+}
+if (!Number.isInteger(maxAttachmentBytes) || maxAttachmentBytes < 1) {
+  throw new Error("WORKER_MAX_ATTACHMENT_BYTES must be a positive integer.");
+}
+
 const pool = new Pool({ connectionString: process.env.DATABASE_URL, max: 5, application_name: "synccut-worker" });
 const cipher = createCredentialCipher(process.env.SYNC_CREDENTIAL_ENCRYPTION_KEY);
 const grants = createUserGrantStore({
@@ -45,15 +56,11 @@ const worker = createSyncWorker({
     getAccessToken: grants.provider(connection.tenant_id, connection.connected_by_member_id),
     fetchImpl: fetch,
   }),
-  compensationMinutes: Number(process.env.WORKER_COMPENSATION_MINUTES ?? 15),
+  compensationMinutes,
   maxAttachmentBytes,
   log: (event, details) => process.stderr.write(`[worker] ${event} ${JSON.stringify(details)}\n`),
 });
 
-const pollMs = Number(process.env.WORKER_POLL_MS ?? 3000);
-const maxAttachmentBytes = Number(process.env.WORKER_MAX_ATTACHMENT_BYTES ?? 256 * 1024 * 1024);
-if (!Number.isInteger(pollMs) || pollMs < 250) throw new Error("WORKER_POLL_MS must be an integer of at least 250.");
-if (!Number.isInteger(maxAttachmentBytes) || maxAttachmentBytes < 1) throw new Error("WORKER_MAX_ATTACHMENT_BYTES must be a positive integer.");
 let stopped = false;
 let compensationTimer = null;
 let compensationInFlight = null;
@@ -73,13 +80,13 @@ async function compensationLoop() {
   if (compensationInFlight) return compensationInFlight;
   compensationInFlight = (async () => {
     try { await worker.compensationPass(); }
-    catch (error) { process.stderr.write(`[worker] compensation failed: ${error.message}\\n`); }
+    catch (error) { process.stderr.write(`[worker] compensation failed: ${error.message}\n`); }
     finally { compensationInFlight = null; }
   })();
   return compensationInFlight;
 }
 
-process.stdout.write("SyncCut worker started\\n");
+process.stdout.write("SyncCut worker started\n");
 compensationLoop();
 if (compensationMinutes > 0) compensationTimer = setInterval(compensationLoop, compensationMinutes * 60 * 1000);
 const mainLoop = loop();

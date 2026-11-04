@@ -267,7 +267,7 @@ final class DevicePairingService {
     func failJob(server: String, token: String, jobId: String, message: String) async throws {
         let _: FailJobResponse = try await send(
             server: server,
-            path: "api/agent/jobs/\\(jobId)/fail",
+            path: "api/agent/jobs/\(jobId)/fail",
             method: "POST",
             body: FailJobRequest(error: String(message.prefix(1000))),
             token: token,

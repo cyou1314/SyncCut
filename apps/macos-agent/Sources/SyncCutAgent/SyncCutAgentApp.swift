@@ -445,7 +445,7 @@ final class AgentViewModel: ObservableObject {
                 if showIdleMessage { cloudMessage = "目前没有待处理的云端素材任务。" }
                 return
             }
-            cloudMessage = "任务完成：\\(result.assetCount) 个素材已下载并通过 SHA-256 校验；\\(result.reusedCount) 个文件复用了本地缓存。素材已放入 CloudAssets，剪映导入将在下一阶段接入。"
+            cloudMessage = cloudJobCompletionMessage(assetCount: result.assetCount, reusedCount: result.reusedCount)
         } catch {
             cloudMessage = error.localizedDescription
         }
