@@ -39,7 +39,6 @@ final class AgentViewModel: ObservableObject {
     @Published var errors: [String] = []
     @Published var isWorking = false
     @Published var resultText = ""
-    @Published var picker: PickerTarget?
 
     @Published var libraryAssets: [LibraryAsset] = []
     @Published var searchText = ""
@@ -261,7 +260,19 @@ final class AgentViewModel: ObservableObject {
     }
 
     func choose(_ target: PickerTarget) {
-        picker = target
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = false
+        panel.canCreateDirectories = target == .library
+        panel.canChooseFiles = target == .table
+        panel.canChooseDirectories = target != .table
+        if target == .table {
+            panel.allowedContentTypes = [.commaSeparatedText]
+        }
+        NSApp.activate(ignoringOtherApps: true)
+        panel.begin { [weak self] response in
+            guard response == .OK, let url = panel.url else { return }
+            Task { @MainActor in self?.accept(url, for: target) }
+        }
     }
 
     func accept(_ url: URL, for target: PickerTarget) {
@@ -552,23 +563,6 @@ struct AgentMenuView: View {
             Button("取消", role: .cancel) { pendingArchive = nil }
         } message: {
             Text("将“\(pendingArchive?.metadata.name ?? "该素材")”从在用列表中隐藏。不会删除音频文件或历史版本，可在“已归档”中恢复。")
-        }
-        .fileImporter(
-            isPresented: Binding(
-                get: { model.picker != nil },
-                set: { if !$0 { model.picker = nil } }
-            ),
-            allowedContentTypes: allowedTypes,
-            allowsMultipleSelection: false
-        ) { result in
-            guard let target = model.picker else { return }
-            model.picker = nil
-            do {
-                guard let url = try result.get().first else { return }
-                model.accept(url, for: target)
-            } catch {
-                model.errors = [error.localizedDescription]
-            }
         }
     }
 
@@ -922,14 +916,6 @@ struct AgentMenuView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
             .frame(maxHeight: 92)
-        }
-    }
-
-    private var allowedTypes: [UTType] {
-        switch model.picker {
-        case .table: return [UTType(filenameExtension: "csv") ?? .commaSeparatedText]
-        case .audio, .library: return [.folder]
-        case .none: return [.item]
         }
     }
 
