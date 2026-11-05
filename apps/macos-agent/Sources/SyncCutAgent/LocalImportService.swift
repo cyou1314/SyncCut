@@ -1,6 +1,18 @@
 import Foundation
 import CryptoKit
 
+struct AudioScanResult {
+    struct Notice: Identifiable {
+        let id = UUID()
+        let name: String
+        let reason: String
+        let failed: Bool
+    }
+    let preview: LocalImportPreview
+    let notices: [Notice]
+    let unchanged: Int
+}
+
 struct LocalImportPreview {
     struct Item {
         let sourceID: String
@@ -95,6 +107,68 @@ enum LocalImportError: LocalizedError {
 
 struct LocalImportService {
     private let audioExtensions: Set<String> = ["mp3", "wav", "m4a", "aac", "aiff", "aif", "flac", "ogg", "opus"]
+
+    func scanAudio(_ selections: [URL], libraryDirectory: URL, manifestURL: URL) throws -> AudioScanResult {
+        let existing = try loadManifest(manifestURL)
+        let byID = Dictionary(uniqueKeysWithValues: existing.assets.map { ($0.sourceId, $0) })
+        let libraryPath = libraryDirectory.standardizedFileURL.resolvingSymlinksInPath().path
+        var seen = Set<String>(), items: [LocalImportPreview.Item] = [], notices: [AudioScanResult.Notice] = []
+        var unchanged = 0
+        func inspect(_ url: URL) {
+            let path = url.standardizedFileURL.resolvingSymlinksInPath().path
+            guard !path.hasPrefix(libraryPath + "/"), path != libraryPath else {
+                notices.append(.init(name: url.lastPathComponent, reason: "素材库内的文件不能作为来源", failed: true)); return
+            }
+            guard seen.insert(path).inserted else {
+                notices.append(.init(name: url.lastPathComponent, reason: "重复选择，已跳过", failed: false)); return
+            }
+            guard audioExtensions.contains(url.pathExtension.lowercased()) else {
+                notices.append(.init(name: url.lastPathComponent, reason: "不支持的格式", failed: false)); return
+            }
+            do {
+                let values = try url.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey])
+                guard values.isRegularFile == true, values.isSymbolicLink != true else {
+                    notices.append(.init(name: url.lastPathComponent, reason: "不是可读取的普通文件", failed: true)); return
+                }
+                let digest = try sha256(fileURL: url)
+                let id = "local_path_" + sha256(Data(path.utf8))
+                let old = byID[id]
+                if old?.versions.last?.sha256 == digest {
+                    unchanged += 1
+                    notices.append(.init(name: url.lastPathComponent, reason: "已存在，内容未变化", failed: false)); return
+                }
+                let metadata = old?.metadata ?? AssetMetadata(name: url.deletingPathExtension().lastPathComponent, kind: "", project: "", episode: "", scene: "", shot: "", tags: [], notes: "", timing: .init())
+                items.append(.init(sourceID: id, metadata: metadata, sourceURL: url, byteCount: Int64(values.fileSize ?? 0), sha256: digest, hadPreviousVersion: old != nil))
+            } catch { notices.append(.init(name: url.lastPathComponent, reason: "无法读取：\(error.localizedDescription)", failed: true)) }
+        }
+        for selection in selections {
+            do {
+                let values = try selection.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
+                if values.isSymbolicLink == true { notices.append(.init(name: selection.lastPathComponent, reason: "不支持符号链接", failed: false)); continue }
+                if values.isDirectory == true {
+                    var found = false
+                    guard let enumerator = FileManager.default.enumerator(at: selection, includingPropertiesForKeys: [.isRegularFileKey, .isSymbolicLinkKey], errorHandler: { url, error in
+                        notices.append(.init(name: url.lastPathComponent, reason: "无法读取：\(error.localizedDescription)", failed: true)); return true
+                    }) else { notices.append(.init(name: selection.lastPathComponent, reason: "无法读取文件夹", failed: true)); continue }
+                    for case let url as URL in enumerator {
+                        let value = try url.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey])
+                        if value.isSymbolicLink == true { enumerator.skipDescendants(); continue }
+                        if value.isRegularFile == true { found = true; inspect(url) }
+                    }
+                    if !found { notices.append(.init(name: selection.lastPathComponent, reason: "文件夹为空或没有可读取的文件", failed: false)) }
+                } else { inspect(selection) }
+            } catch { notices.append(.init(name: selection.lastPathComponent, reason: "无法读取：\(error.localizedDescription)", failed: true)) }
+        }
+        return .init(preview: .init(items: items, errors: []), notices: notices, unchanged: unchanged)
+    }
+
+    func updateMetadata(_ sourceID: String, metadata: AssetMetadata, manifestURL: URL) throws {
+        var manifest = try loadManifest(manifestURL)
+        guard let index = manifest.assets.firstIndex(where: { $0.sourceId == sourceID }) else { throw LocalImportError.assetNotFound(sourceID) }
+        manifest.assets[index].metadata = metadata
+        manifest.updatedAt = ISO8601DateFormatter().string(from: Date())
+        try writeManifest(manifest, to: manifestURL)
+    }
 
     func preview(tableURL: URL, audioDirectory: URL, manifestURL: URL) throws -> LocalImportPreview {
         let data = try Data(contentsOf: tableURL)
@@ -201,6 +275,13 @@ struct LocalImportService {
         var added = 0, updated = 0, unchanged = 0
 
         for item in preview.items {
+            guard try sha256(fileURL: item.sourceURL) == item.sha256 else { throw LocalImportError.sourceChanged(item.sourceURL.lastPathComponent) }
+        }
+        var createdFiles: [URL] = []
+        var committed = false
+        defer { if !committed { for url in createdFiles { try? FileManager.default.removeItem(at: url) } } }
+
+        for item in preview.items {
             let old = records[item.sourceID]
             let currentDigest = try sha256(fileURL: item.sourceURL)
             guard currentDigest == item.sha256 else { throw LocalImportError.sourceChanged(item.sourceURL.lastPathComponent) }
@@ -221,6 +302,7 @@ struct LocalImportService {
                 try FileManager.default.copyItem(at: item.sourceURL, to: temporary)
                 guard try sha256(fileURL: temporary) == item.sha256 else { throw LocalImportError.sourceChanged(item.sourceURL.lastPathComponent) }
                 try FileManager.default.moveItem(at: temporary, to: destination)
+                createdFiles.append(destination)
             } catch {
                 try? FileManager.default.removeItem(at: temporary)
                 throw error
@@ -243,6 +325,7 @@ struct LocalImportService {
         manifest.updatedAt = ISO8601DateFormatter().string(from: Date())
         try FileManager.default.createDirectory(at: libraryDirectory, withIntermediateDirectories: true)
         try writeManifest(manifest, to: manifestURL)
+        committed = true
         return (added, updated, unchanged)
     }
 

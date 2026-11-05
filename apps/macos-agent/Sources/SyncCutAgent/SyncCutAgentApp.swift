@@ -8,6 +8,10 @@ struct SyncCutAgentApp: App {
     @StateObject private var model = AgentViewModel()
 
     var body: some Scene {
+        WindowGroup("SyncCut 助手") {
+            AgentMenuView(model: model)
+        }
+        .windowResizability(.contentSize)
         MenuBarExtra("SyncCut", systemImage: "waveform") {
             AgentMenuView(model: model)
         }
@@ -36,6 +40,9 @@ final class AgentViewModel: ObservableObject {
     @Published var audioURL: URL?
     @Published var libraryURL: URL?
     @Published var preview: LocalImportPreview?
+    @Published var audioSelections: [URL] = []
+    @Published var audioScan: AudioScanResult?
+    @Published var advancedImport = false
     @Published var errors: [String] = []
     @Published var isWorking = false
     @Published var resultText = ""
@@ -56,12 +63,24 @@ final class AgentViewModel: ObservableObject {
     private var cloudPollingTask: Task<Void, Never>?
 
     enum PickerTarget: String, Identifiable {
-        case table, audio, library
+        case table, audio, library, directAudio
         var id: String { rawValue }
     }
 
     init() {
+        let hadSavedLibrary = UserDefaults.standard.data(forKey: libraryBookmarkKey) != nil
         restoreLibraryBookmark()
+        if libraryURL == nil && !hadSavedLibrary {
+            do {
+                let base = try FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
+                let directory = base.appendingPathComponent("SyncCut/PersonalLibrary", isDirectory: true)
+                try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+                libraryURL = directory
+                refreshLibrary()
+            } catch {
+                errors = ["无法准备本机素材库：\(error.localizedDescription)"]
+            }
+        }
         Task { await restoreDeviceSession() }
     }
 
@@ -173,9 +192,13 @@ final class AgentViewModel: ObservableObject {
         guard let preview, let libraryURL, let manifestURL else { return }
         isWorking = true
         errors = []
+        let sources = advancedImport ? [tableURL, audioURL].compactMap { $0 } : audioSelections
+        let skipped = advancedImport ? 0 : (audioScan?.notices.filter { !$0.failed }.count ?? 0)
+        let failed = advancedImport ? 0 : (audioScan?.notices.filter(\.failed).count ?? 0)
         Task.detached(priority: .userInitiated) {
-            let granted = libraryURL.startAccessingSecurityScopedResource()
-            defer { if granted { libraryURL.stopAccessingSecurityScopedResource() } }
+            let scopedURLs = sources + [libraryURL]
+            let granted = scopedURLs.map { $0.startAccessingSecurityScopedResource() }
+            defer { for (url, allowed) in zip(scopedURLs, granted) where allowed { url.stopAccessingSecurityScopedResource() } }
             do {
                 let result = try self.importer.apply(
                     preview,
@@ -184,9 +207,10 @@ final class AgentViewModel: ObservableObject {
                 )
                 let assets = try self.importer.listAssets(manifestURL: manifestURL)
                 await MainActor.run {
-                    self.resultText = "导入完成：新增 \(result.added) · 更新 \(result.updated) · 未变更 \(result.unchanged)"
+                    self.resultText = "导入完成：成功 \(result.added + result.updated) · 跳过 \(skipped + result.unchanged) · 失败 \(failed)"
                     self.libraryAssets = assets
                     self.preview = nil
+                    self.audioScan = nil
                     self.isWorking = false
                 }
             } catch {
@@ -261,22 +285,51 @@ final class AgentViewModel: ObservableObject {
 
     func choose(_ target: PickerTarget) {
         let panel = NSOpenPanel()
-        panel.allowsMultipleSelection = false
+        panel.allowsMultipleSelection = target == .directAudio
         panel.canCreateDirectories = target == .library
-        panel.canChooseFiles = target == .table
+        panel.canChooseFiles = target == .table || target == .directAudio
         panel.canChooseDirectories = target != .table
         if target == .table {
             panel.allowedContentTypes = [.commaSeparatedText]
         }
         NSApp.activate(ignoringOtherApps: true)
         panel.begin { [weak self] response in
-            guard response == .OK, let url = panel.url else { return }
-            Task { @MainActor in self?.accept(url, for: target) }
+            guard response == .OK else { return }
+            let urls = panel.urls
+            Task { @MainActor in
+                guard let self, let url = urls.first else { return }
+                if target == .directAudio { self.audioSelections = urls; self.scanSelectedAudio() }
+                else { self.accept(url, for: target) }
+            }
         }
+    }
+
+    func scanSelectedAudio() {
+        guard let libraryURL, let manifestURL, !audioSelections.isEmpty else { errors = ["请先选择素材库，再添加音频。"] ; return }
+        let selections = audioSelections
+        isWorking = true; errors = []; audioScan = nil; preview = nil; resultText = ""
+        Task.detached(priority: .userInitiated) {
+            let scoped = selections + [libraryURL]
+            let granted = scoped.map { $0.startAccessingSecurityScopedResource() }
+            defer { for (url, allowed) in zip(scoped, granted) where allowed { url.stopAccessingSecurityScopedResource() } }
+            do {
+                let result = try self.importer.scanAudio(selections, libraryDirectory: libraryURL, manifestURL: manifestURL)
+                await MainActor.run { self.audioScan = result; self.preview = result.preview; self.isWorking = false }
+            } catch { await MainActor.run { self.errors = [error.localizedDescription]; self.isWorking = false } }
+        }
+    }
+
+    func saveMetadata(_ sourceID: String, metadata: AssetMetadata) {
+        guard let libraryURL, let manifestURL else { return }
+        let granted = libraryURL.startAccessingSecurityScopedResource()
+        defer { if granted { libraryURL.stopAccessingSecurityScopedResource() } }
+        do { try importer.updateMetadata(sourceID, metadata: metadata, manifestURL: manifestURL); refreshLibrary(); resultText = "素材信息已保存" }
+        catch { errors = [error.localizedDescription] }
     }
 
     func accept(_ url: URL, for target: PickerTarget) {
         switch target {
+        case .directAudio: break
         case .table:
             tableURL = url
             preview = nil
@@ -287,6 +340,7 @@ final class AgentViewModel: ObservableObject {
             stopPlayback()
             libraryURL = url
             preview = nil
+            audioScan = nil
             do {
                 let bookmark = try url.bookmarkData(
                     options: [.withSecurityScope],
@@ -501,6 +555,7 @@ struct AgentMenuView: View {
     @ObservedObject var model: AgentViewModel
     @State private var pendingArchive: LibraryAsset?
     @State private var showArchiveConfirmation = false
+    @State private var editingAsset: LibraryAsset?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -563,6 +618,12 @@ struct AgentMenuView: View {
             Button("取消", role: .cancel) { pendingArchive = nil }
         } message: {
             Text("将“\(pendingArchive?.metadata.name ?? "该素材")”从在用列表中隐藏。不会删除音频文件或历史版本，可在“已归档”中恢复。")
+        }
+        .sheet(item: $editingAsset) { asset in
+            AssetEditorView(asset: asset) { metadata in
+                model.saveMetadata(asset.sourceID, metadata: metadata)
+                editingAsset = nil
+            } onCancel: { editingAsset = nil }
         }
     }
 
@@ -653,14 +714,39 @@ struct AgentMenuView: View {
                 Spacer()
                 if model.isWorking { ProgressView().controlSize(.small) }
             }
+            Text("第一步：添加音频。第二步：确认导入。").font(.caption).foregroundStyle(.secondary)
+            pickerRow("素材库", detail: model.libraryURL == nil ? "请选择保存位置" : "已准备好，可点击更换", icon: "externaldrive") {
+                model.choose(.library)
+            }
+            if !model.advancedImport {
+                Button { model.choose(.directAudio) } label: {
+                    Label("添加音频", systemImage: "plus").frame(maxWidth: .infinity)
+                }.buttonStyle(.borderedProminent).disabled(model.libraryURL == nil || model.isWorking)
+                Text("支持选择多个音频文件或文件夹").font(.caption).foregroundStyle(.secondary)
+                if let scan = model.audioScan {
+                    Text("共检查 \(scan.preview.items.count + scan.notices.count) 项").font(.caption)
+                    Text("可导入 \(scan.preview.items.count) · 已存在 \(scan.unchanged) · 跳过 \(scan.notices.filter { !$0.failed }.count - scan.unchanged) · 失败 \(scan.notices.filter(\.failed).count)").font(.caption)
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 4) {
+                            ForEach(scan.preview.items, id: \.sourceID) { item in
+                                Text("\(item.metadata.name) · \(item.hadPreviousVersion ? "更新版本" : "可导入")").font(.caption)
+                            }
+                            ForEach(scan.notices) { notice in Text("\(notice.name) · \(notice.reason)").font(.caption).foregroundStyle(notice.failed ? .red : .secondary) }
+                        }.frame(maxWidth: .infinity, alignment: .leading)
+                    }.frame(maxHeight: 180)
+                    Button("导入素材库") { model.applyImport() }.buttonStyle(.borderedProminent)
+                        .disabled(scan.preview.items.isEmpty || model.isWorking)
+                }
+                Button("查看素材库") { model.activeTab = "素材库" }
+                Button("使用 CSV 高级导入") { model.advancedImport = true; model.preview = nil; model.audioScan = nil }.disabled(model.isWorking)
+                Spacer(minLength: 0)
+            } else {
+            Button("返回简单导入") { model.advancedImport = false; model.preview = nil }.disabled(model.isWorking)
             pickerRow("素材清单", detail: model.tableURL?.lastPathComponent ?? "选择 CSV 文件", icon: "tablecells") {
                 model.choose(.table)
             }
             pickerRow("音频目录", detail: model.audioURL?.lastPathComponent ?? "选择音频文件夹", icon: "folder") {
                 model.choose(.audio)
-            }
-            pickerRow("素材库", detail: model.libraryURL?.path ?? "选择保存位置", icon: "externaldrive") {
-                model.choose(.library)
             }
             Button { model.runPreview() } label: {
                 Label("检查并预览", systemImage: "doc.magnifyingglass")
@@ -698,6 +784,7 @@ struct AgentMenuView: View {
                     .disabled(!model.canImport)
                 }
             }
+            }
         }
     }
 
@@ -713,10 +800,10 @@ struct AgentMenuView: View {
                 .help("刷新素材库")
                 .disabled(model.libraryURL == nil)
             }
-            if let libraryURL = model.libraryURL {
+            if model.libraryURL != nil {
                 HStack(spacing: 5) {
                     Image(systemName: "folder").foregroundStyle(.secondary)
-                    Text(libraryURL.path)
+                    Text("已选择素材库")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
@@ -867,6 +954,7 @@ struct AgentMenuView: View {
             HStack {
                 Text("版本历史").font(.caption.weight(.semibold))
                 Spacer()
+                Button("编辑信息") { editingAsset = asset }
                 Text(asset.metadata.project.isEmpty ? "未填写项目" : asset.metadata.project)
                     .font(.caption2).foregroundStyle(.secondary)
             }
@@ -891,7 +979,7 @@ struct AgentMenuView: View {
                                 .frame(width: 30, alignment: .leading)
                             VStack(alignment: .leading, spacing: 1) {
                                 Text(version.filename).font(.caption2).lineLimit(1)
-                                Text("\(byteLabel(version.sizeBytes)) · \(String(version.sha256.prefix(12)))")
+                                Text(byteLabel(version.sizeBytes))
                                     .font(.system(size: 9, design: .monospaced))
                                     .foregroundStyle(.secondary)
                             }
@@ -942,6 +1030,7 @@ struct AgentMenuView: View {
             }
             .contentShape(Rectangle())
         }
+        .disabled(model.isWorking)
         .buttonStyle(.plain)
     }
 
@@ -959,7 +1048,7 @@ struct AgentMenuView: View {
         case "sfx": return "音效"
         case "voice": return "配音"
         case "ambience": return "环境音"
-        default: return kind
+        default: return kind.isEmpty ? "未分类" : kind
         }
     }
 
@@ -971,5 +1060,70 @@ struct AgentMenuView: View {
 
     private func byteLabel(_ bytes: Int64) -> String {
         ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
+    }
+}
+
+
+private struct AssetEditorView: View {
+    @State private var metadata: AssetMetadata
+    @State private var tags: String
+    @State private var timing: [String]
+    @State private var error = ""
+    let onSave: (AssetMetadata) -> Void
+    let onCancel: () -> Void
+
+    init(asset: LibraryAsset, onSave: @escaping (AssetMetadata) -> Void, onCancel: @escaping () -> Void) {
+        _metadata = State(initialValue: asset.metadata)
+        _tags = State(initialValue: asset.metadata.tags.joined(separator: ", "))
+        let t = asset.metadata.timing
+        _timing = State(initialValue: [t.start, t.inPoint, t.outPoint, t.volume, t.fadeIn, t.fadeOut].map { $0.map(String.init(describing:)) ?? "" })
+        self.onSave = onSave
+        self.onCancel = onCancel
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("编辑素材信息").font(.headline)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 8) {
+                    TextField("素材名称", text: $metadata.name)
+                    Picker("类型", selection: $metadata.kind) {
+                        Text("未分类").tag(""); Text("音乐").tag("music"); Text("音效").tag("sfx")
+                        Text("配音").tag("voice"); Text("环境音").tag("ambience")
+                    }
+                    TextField("项目名称", text: $metadata.project)
+                    TextField("集数", text: $metadata.episode)
+                    TextField("场景", text: $metadata.scene)
+                    TextField("镜头编号", text: $metadata.shot)
+                    TextField("标签（用逗号分隔）", text: $tags)
+                    TextField("备注", text: $metadata.notes)
+                    Picker("目标音轨", selection: Binding(get: { metadata.timing.track ?? "" }, set: { metadata.timing.track = $0.isEmpty ? nil : $0 })) {
+                        Text("未指定").tag(""); Text("A1").tag("A1"); Text("A2").tag("A2"); Text("A3").tag("A3"); Text("A4").tag("A4")
+                    }
+                    ForEach(Array(["开始时间", "素材入点", "素材出点", "音量", "淡入", "淡出"].enumerated()), id: \.offset) { index, label in
+                        TextField(label, text: Binding(get: { timing[index] }, set: { timing[index] = $0 }))
+                    }
+                }
+            }
+            if !error.isEmpty { Text(error).foregroundStyle(.red).font(.caption) }
+            HStack {
+                Button("取消", action: onCancel)
+                Spacer()
+                Button("保存") { save() }
+                    .disabled(metadata.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+        }.padding(18).frame(width: 350, height: 550)
+    }
+
+    private func save() {
+        let numbers = timing.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+        guard numbers.allSatisfy({ $0.isEmpty || (Double($0).map { $0.isFinite && $0 >= 0 } ?? false) }) else { error = "时间和音量必须是非负数字。"; return }
+        let values = numbers.map { $0.isEmpty ? nil : Double($0) }
+        if let start = values[1], let end = values[2], end <= start { error = "素材出点必须大于素材入点。"; return }
+        var result = metadata
+        result.timing.start = values[0]; result.timing.inPoint = values[1]; result.timing.outPoint = values[2]
+        result.timing.volume = values[3]; result.timing.fadeIn = values[4]; result.timing.fadeOut = values[5]
+        result.tags = tags.split(separator: ",").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
+        onSave(result)
     }
 }
