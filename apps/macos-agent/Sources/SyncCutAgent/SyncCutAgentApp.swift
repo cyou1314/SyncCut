@@ -1,11 +1,17 @@
 import SwiftUI
 import AppKit
+import AVFoundation
+import UniformTypeIdentifiers
 
 @main
 struct SyncCutAgentApp: App {
     @StateObject private var model = AgentViewModel()
 
     var body: some Scene {
+        WindowGroup("SyncCut 助手") {
+            AgentMenuView(model: model)
+        }
+        .windowResizability(.contentSize)
         MenuBarExtra("SyncCut", systemImage: "waveform") {
             AgentMenuView(model: model)
         }
@@ -22,12 +28,91 @@ final class AgentViewModel: ObservableObject {
         .first?
         .appendingPathComponent("SyncCut/Cache", isDirectory: true).path ?? "不可用"
 
+    @Published var activeTab = "导入"
+    @Published var cloudOrigin = UserDefaults.standard.string(forKey: "SyncCut.cloudOrigin") ?? ""
+    @Published var pairingCode = ""
+    @Published var deviceName = Host.current().localizedName ?? "SyncCut Mac"
+    @Published var cloudDevice: DeviceIdentity?
+    @Published var cloudMessage = ""
+    @Published var isPairing = false
+    @Published var isRunningCloudJob = false
+    @Published var tableURL: URL?
+    @Published var audioURL: URL?
+    @Published var libraryURL: URL?
+    @Published var preview: LocalImportPreview?
+    @Published var audioSelections: [URL] = []
+    @Published var audioScan: AudioScanResult?
+    @Published var advancedImport = false
+    @Published var errors: [String] = []
+    @Published var isWorking = false
+    @Published var resultText = ""
+
+    @Published var libraryAssets: [LibraryAsset] = []
+    @Published var searchText = ""
+    @Published var kindFilter = "全部"
+    @Published var showArchived = false
+    @Published var selectedAssetID: String?
+    @Published private(set) var playingVersionKey: String?
+
+    private let importer = LocalImportService()
+    private let devicePairingService = DevicePairingService()
+    private let deviceTokenStore = DeviceTokenStore()
+    private let libraryBookmarkKey = "SyncCut.libraryBookmark.v1"
+    private var audioPlayer: AVAudioPlayer?
+    private var audioAccessGranted = false
+    private var cloudPollingTask: Task<Void, Never>?
+
+    enum PickerTarget: String, Identifiable {
+        case table, audio, library, directAudio
+        var id: String { rawValue }
+    }
+
+    init() {
+        let hadSavedLibrary = UserDefaults.standard.data(forKey: libraryBookmarkKey) != nil
+        restoreLibraryBookmark()
+        if libraryURL == nil && !hadSavedLibrary {
+            do {
+                let base = try FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
+                let directory = base.appendingPathComponent("SyncCut/PersonalLibrary", isDirectory: true)
+                try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+                libraryURL = directory
+                refreshLibrary()
+            } catch {
+                errors = ["无法准备本机素材库：\(error.localizedDescription)"]
+            }
+        }
+        Task { await restoreDeviceSession() }
+    }
+
+    var manifestURL: URL? { libraryURL?.appendingPathComponent("manifest.json") }
+    var canPreview: Bool { tableURL != nil && audioURL != nil && libraryURL != nil && !isWorking }
+    var canImport: Bool { preview != nil && preview?.errors.isEmpty == true && !isWorking }
+
+    var visibleAssets: [LibraryAsset] {
+        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        return libraryAssets.filter { asset in
+            guard asset.isArchived == showArchived else { return false }
+            let kindMatches = kindFilter == "全部" || asset.metadata.kind == Self.kindCode(kindFilter)
+            guard kindMatches else { return false }
+            guard !query.isEmpty else { return true }
+            let searchable = [
+                asset.metadata.name, asset.metadata.project, asset.metadata.episode,
+                asset.metadata.scene, asset.metadata.shot, asset.metadata.notes,
+                asset.metadata.tags.joined(separator: " ")
+            ].joined(separator: " ").localizedLowercase
+            return searchable.contains(query.localizedLowercase)
+        }
+    }
+
+    var selectedAsset: LibraryAsset? {
+        guard let selectedAssetID else { return nil }
+        return libraryAssets.first { $0.sourceID == selectedAssetID && $0.isArchived == showArchived }
+    }
+
     func prepareCache() {
         do {
             let url = URL(fileURLWithPath: cachePath, isDirectory: true)
-            try FileManager.default.createDirectory(
-                at: url, withIntermediateDirectories: true
-            )
+            try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
             status = "本地缓存目录已准备"
         } catch {
             status = "缓存目录创建失败：\(error.localizedDescription)"
@@ -35,38 +120,1010 @@ final class AgentViewModel: ObservableObject {
     }
 
     func openCache() {
-        let url = URL(fileURLWithPath: cachePath, isDirectory: true)
-        NSWorkspace.shared.open(url)
+        NSWorkspace.shared.open(URL(fileURLWithPath: cachePath, isDirectory: true))
+    }
+
+    func openLibrary() {
+        guard let libraryURL else { return }
+        NSWorkspace.shared.open(libraryURL)
+    }
+
+    func revealVersion(_ version: LibraryAssetVersion) {
+        let url = URL(fileURLWithPath: version.diskPath)
+        NSWorkspace.shared.activateFileViewerSelecting([url])
+    }
+
+    func refreshLibrary() {
+        guard let libraryURL, let manifestURL else {
+            libraryAssets = []
+            return
+        }
+        guard FileManager.default.fileExists(atPath: libraryURL.path) else {
+            libraryAssets = []
+            errors = ["上次选择的素材库目录已不存在，请重新选择。"]
+            return
+        }
+        let granted = libraryURL.startAccessingSecurityScopedResource()
+        defer { if granted { libraryURL.stopAccessingSecurityScopedResource() } }
+        do {
+            libraryAssets = try importer.listAssets(manifestURL: manifestURL)
+            if let selectedAssetID, !libraryAssets.contains(where: { $0.sourceID == selectedAssetID }) {
+                self.selectedAssetID = nil
+            }
+        } catch {
+            errors = [error.localizedDescription]
+        }
+    }
+
+    func runPreview() {
+        guard let tableURL, let audioURL, let libraryURL, let manifestURL else { return }
+        isWorking = true
+        preview = nil
+        errors = []
+        resultText = ""
+        Task.detached(priority: .userInitiated) {
+            let scopedURLs = [tableURL, audioURL, libraryURL]
+            let accessGranted = scopedURLs.map { $0.startAccessingSecurityScopedResource() }
+            defer {
+                for (url, granted) in zip(scopedURLs, accessGranted) where granted {
+                    url.stopAccessingSecurityScopedResource()
+                }
+            }
+            do {
+                let value = try self.importer.preview(
+                    tableURL: tableURL,
+                    audioDirectory: audioURL,
+                    manifestURL: manifestURL
+                )
+                await MainActor.run {
+                    self.preview = value
+                    self.isWorking = false
+                }
+            } catch {
+                await MainActor.run {
+                    self.errors = [error.localizedDescription]
+                    self.isWorking = false
+                }
+            }
+        }
+    }
+
+    func applyImport() {
+        guard let preview, let libraryURL, let manifestURL else { return }
+        isWorking = true
+        errors = []
+        let sources = advancedImport ? [tableURL, audioURL].compactMap { $0 } : audioSelections
+        let skipped = advancedImport ? 0 : (audioScan?.notices.filter { !$0.failed }.count ?? 0)
+        let failed = advancedImport ? 0 : (audioScan?.notices.filter(\.failed).count ?? 0)
+        Task.detached(priority: .userInitiated) {
+            let scopedURLs = sources + [libraryURL]
+            let granted = scopedURLs.map { $0.startAccessingSecurityScopedResource() }
+            defer { for (url, allowed) in zip(scopedURLs, granted) where allowed { url.stopAccessingSecurityScopedResource() } }
+            do {
+                let result = try self.importer.apply(
+                    preview,
+                    libraryDirectory: libraryURL,
+                    manifestURL: manifestURL
+                )
+                let assets = try self.importer.listAssets(manifestURL: manifestURL)
+                await MainActor.run {
+                    self.resultText = "导入完成：成功 \(result.added + result.updated) · 跳过 \(skipped + result.unchanged) · 失败 \(failed)"
+                    self.libraryAssets = assets
+                    self.preview = nil
+                    self.audioScan = nil
+                    self.isWorking = false
+                }
+            } catch {
+                await MainActor.run {
+                    self.errors = [error.localizedDescription]
+                    self.isWorking = false
+                }
+            }
+        }
+    }
+
+    func setArchived(_ asset: LibraryAsset, archived: Bool) {
+        guard let libraryURL, let manifestURL else { return }
+        let granted = libraryURL.startAccessingSecurityScopedResource()
+        defer { if granted { libraryURL.stopAccessingSecurityScopedResource() } }
+        do {
+            try importer.setArchived(asset.sourceID, archived: archived, manifestURL: manifestURL)
+            libraryAssets = try importer.listAssets(manifestURL: manifestURL)
+            if selectedAssetID == asset.sourceID { selectedAssetID = nil }
+            resultText = archived ? "已归档：\(asset.metadata.name)（文件与历史版本均保留）" : "已恢复：\(asset.metadata.name)"
+        } catch {
+            errors = [error.localizedDescription]
+        }
+    }
+
+    func selectAsset(_ asset: LibraryAsset) {
+        selectedAssetID = asset.sourceID
+    }
+
+    func isPlaying(_ asset: LibraryAsset, version: LibraryAssetVersion) -> Bool {
+        playingVersionKey == "\(asset.sourceID):\(version.version)" && (audioPlayer?.isPlaying ?? false)
+    }
+
+    func togglePlayback(_ asset: LibraryAsset, version: LibraryAssetVersion) {
+        let key = "\(asset.sourceID):\(version.version)"
+        if playingVersionKey == key, audioPlayer?.isPlaying == true {
+            stopPlayback()
+            return
+        }
+        stopPlayback()
+        guard let libraryURL else {
+            errors = ["请先选择素材库目录。"]
+            return
+        }
+        let granted = libraryURL.startAccessingSecurityScopedResource()
+        do {
+            let player = try AVAudioPlayer(contentsOf: URL(fileURLWithPath: version.diskPath))
+            guard player.prepareToPlay(), player.play() else {
+                throw NSError(domain: "SyncCut.AudioPreview", code: 1, userInfo: [
+                    NSLocalizedDescriptionKey: "音频无法开始播放。"
+                ])
+            }
+            audioPlayer = player
+            audioAccessGranted = granted
+            playingVersionKey = key
+            errors = []
+        } catch {
+            if granted { libraryURL.stopAccessingSecurityScopedResource() }
+            errors = ["无法试听 \(version.filename)：\(error.localizedDescription)"]
+        }
+    }
+
+    func stopPlayback() {
+        audioPlayer?.stop()
+        audioPlayer = nil
+        if audioAccessGranted, let libraryURL {
+            libraryURL.stopAccessingSecurityScopedResource()
+        }
+        audioAccessGranted = false
+        playingVersionKey = nil
+    }
+
+    func choose(_ target: PickerTarget) {
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = target == .directAudio
+        panel.canCreateDirectories = target == .library
+        panel.canChooseFiles = target == .table || target == .directAudio
+        panel.canChooseDirectories = target != .table
+        if target == .table {
+            panel.allowedContentTypes = [.commaSeparatedText]
+        }
+        NSApp.activate(ignoringOtherApps: true)
+        panel.begin { [weak self] response in
+            guard response == .OK else { return }
+            let urls = panel.urls
+            Task { @MainActor in
+                guard let self, let url = urls.first else { return }
+                if target == .directAudio { self.audioSelections = urls; self.scanSelectedAudio() }
+                else { self.accept(url, for: target) }
+            }
+        }
+    }
+
+    func scanSelectedAudio() {
+        guard let libraryURL, let manifestURL, !audioSelections.isEmpty else { errors = ["请先选择素材库，再添加音频。"] ; return }
+        let selections = audioSelections
+        isWorking = true; errors = []; audioScan = nil; preview = nil; resultText = ""
+        Task.detached(priority: .userInitiated) {
+            let scoped = selections + [libraryURL]
+            let granted = scoped.map { $0.startAccessingSecurityScopedResource() }
+            defer { for (url, allowed) in zip(scoped, granted) where allowed { url.stopAccessingSecurityScopedResource() } }
+            do {
+                let result = try self.importer.scanAudio(selections, libraryDirectory: libraryURL, manifestURL: manifestURL)
+                await MainActor.run { self.audioScan = result; self.preview = result.preview; self.isWorking = false }
+            } catch { await MainActor.run { self.errors = [error.localizedDescription]; self.isWorking = false } }
+        }
+    }
+
+    func saveMetadata(_ sourceID: String, metadata: AssetMetadata) {
+        guard let libraryURL, let manifestURL else { return }
+        let granted = libraryURL.startAccessingSecurityScopedResource()
+        defer { if granted { libraryURL.stopAccessingSecurityScopedResource() } }
+        do { try importer.updateMetadata(sourceID, metadata: metadata, manifestURL: manifestURL); refreshLibrary(); resultText = "素材信息已保存" }
+        catch { errors = [error.localizedDescription] }
+    }
+
+    func accept(_ url: URL, for target: PickerTarget) {
+        switch target {
+        case .directAudio: break
+        case .table:
+            tableURL = url
+            preview = nil
+        case .audio:
+            audioURL = url
+            preview = nil
+        case .library:
+            stopPlayback()
+            libraryURL = url
+            preview = nil
+            audioScan = nil
+            do {
+                let bookmark = try url.bookmarkData(
+                    options: [.withSecurityScope],
+                    includingResourceValuesForKeys: nil,
+                    relativeTo: nil
+                )
+                UserDefaults.standard.set(bookmark, forKey: libraryBookmarkKey)
+            } catch {
+                errors = ["无法保存素材库访问权限：\(error.localizedDescription)"]
+            }
+            refreshLibrary()
+        }
+    }
+
+    private func restoreLibraryBookmark() {
+        guard let bookmark = UserDefaults.standard.data(forKey: libraryBookmarkKey) else { return }
+        var isStale = false
+        do {
+            let url = try URL(
+                resolvingBookmarkData: bookmark,
+                options: [.withSecurityScope],
+                relativeTo: nil,
+                bookmarkDataIsStale: &isStale
+            )
+            libraryURL = url
+            if isStale {
+                let refreshed = try url.bookmarkData(
+                    options: [.withSecurityScope],
+                    includingResourceValuesForKeys: nil,
+                    relativeTo: nil
+                )
+                UserDefaults.standard.set(refreshed, forKey: libraryBookmarkKey)
+            }
+            refreshLibrary()
+        } catch {
+            UserDefaults.standard.removeObject(forKey: libraryBookmarkKey)
+            errors = ["无法恢复上次素材库访问权限，请重新选择目录。"]
+        }
+    }
+
+    func pairCloudDevice() {
+        guard !isPairing else { return }
+        let server = cloudOrigin.trimmingCharacters(in: .whitespacesAndNewlines)
+        let code = pairingCode
+        let name = deviceName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !server.isEmpty, !name.isEmpty else {
+            cloudMessage = "请填写云端 API 地址和设备名称。"
+            return
+        }
+        isPairing = true
+        cloudMessage = "正在连接云端并验证配对码…"
+        Task {
+            defer { isPairing = false }
+            do {
+                let pairedResult = try await devicePairingService.pair(
+                    server: server,
+                    code: code,
+                    deviceName: name,
+                    appVersion: "0.3.0",
+                    macosVersion: ProcessInfo.processInfo.operatingSystemVersionString
+                )
+                try deviceTokenStore.save(pairedResult.deviceToken)
+                UserDefaults.standard.set(server, forKey: "SyncCut.cloudOrigin")
+                cloudOrigin = server
+                let identity = try await devicePairingService.currentDevice(server: server, token: pairedResult.deviceToken)
+                cloudDevice = identity
+                paired = true
+                status = "已连接云端"
+                pairingCode = ""
+                cloudMessage = "设备配对成功。设备凭证已保存到 macOS 钥匙串。"
+                startCloudPolling()
+                try? await devicePairingService.heartbeat(
+                    server: server,
+                    token: pairedResult.deviceToken,
+                    appVersion: "0.3.0",
+                    macosVersion: ProcessInfo.processInfo.operatingSystemVersionString
+                )
+            } catch {
+                cloudMessage = error.localizedDescription
+            }
+        }
+    }
+
+    func restoreDeviceSession() async {
+        do {
+            guard let token = try deviceTokenStore.load() else {
+                paired = false
+                status = "尚未配对"
+                return
+            }
+            let server = cloudOrigin.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !server.isEmpty else {
+                paired = true
+                status = "待配置云端"
+                cloudMessage = "检测到已保存的设备凭证，请填写云端 API 地址。"
+                return
+            }
+            do {
+                let identity = try await devicePairingService.currentDevice(server: server, token: token)
+                cloudDevice = identity
+                paired = true
+                status = "已连接云端"
+                startCloudPolling()
+                try? await devicePairingService.heartbeat(
+                    server: server,
+                    token: token,
+                    appVersion: "0.3.0",
+                    macosVersion: ProcessInfo.processInfo.operatingSystemVersionString
+                )
+            } catch let error as DevicePairingError {
+                if case .httpStatus(401, _) = error {
+                    try? deviceTokenStore.delete()
+                    paired = false
+                    status = "授权已撤销"
+                    cloudMessage = "云端设备授权已失效，请重新配对。"
+                } else {
+                    paired = true
+                    status = "云端暂不可达"
+                    cloudMessage = error.localizedDescription
+                }
+            }
+        } catch {
+            paired = false
+            status = "凭证读取失败"
+            cloudMessage = error.localizedDescription
+        }
+    }
+
+    func runNextCloudJob() {
+        Task { await processNextCloudJob(showIdleMessage: true) }
+    }
+
+    private func startCloudPolling() {
+        guard cloudPollingTask == nil else { return }
+        cloudPollingTask = Task {
+            while !Task.isCancelled {
+                if paired && !isRunningCloudJob {
+                    await processNextCloudJob(showIdleMessage: false)
+                }
+                try? await Task.sleep(nanoseconds: 10_000_000_000)
+            }
+        }
+    }
+
+    private func stopCloudPolling() {
+        cloudPollingTask?.cancel()
+        cloudPollingTask = nil
+    }
+
+    private func processNextCloudJob(showIdleMessage: Bool) async {
+        guard !isRunningCloudJob else { return }
+        let server = cloudOrigin.trimmingCharacters(in: .whitespacesAndNewlines)
+        isRunningCloudJob = true
+        if showIdleMessage { cloudMessage = "正在检查云端素材任务…" }
+        defer { isRunningCloudJob = false }
+        do {
+            guard let token = try deviceTokenStore.load() else {
+                throw NSError(domain: "SyncCut.AgentJob", code: 2, userInfo: [
+                    NSLocalizedDescriptionKey: "设备凭证不存在，请重新配对。"
+                ])
+            }
+            let cloudDirectory = URL(fileURLWithPath: cachePath, isDirectory: true)
+                .appendingPathComponent("CloudAssets", isDirectory: true)
+            let cache = CloudAssetCache(directory: cloudDirectory)
+            let runner = AgentJobRunner(service: devicePairingService, cache: cache)
+            guard let result = try await runner.runNext(server: server, token: token) else {
+                if showIdleMessage { cloudMessage = "目前没有待处理的云端素材任务。" }
+                return
+            }
+            cloudMessage = cloudJobCompletionMessage(assetCount: result.assetCount, reusedCount: result.reusedCount)
+        } catch {
+            cloudMessage = error.localizedDescription
+        }
+    }
+
+    func disconnectCloudDevice() {
+        stopCloudPolling()
+        Task {
+            var remoteRevoked = false
+            do {
+                if let token = try deviceTokenStore.load(), !cloudOrigin.isEmpty {
+                    try await devicePairingService.unpair(server: cloudOrigin, token: token)
+                    remoteRevoked = true
+                }
+            } catch {
+                cloudMessage = "云端暂时无法撤销；将清除本机凭证。必要时请在 Web 控制台撤销该设备。"
+            }
+            do {
+                try deviceTokenStore.delete()
+                cloudDevice = nil
+                paired = false
+                status = "尚未配对"
+                cloudMessage = remoteRevoked ? "设备已解除配对。" : "本机凭证已清除。若设备仍显示在控制台，请手动撤销。"
+            } catch {
+                cloudMessage = "无法清除钥匙串凭证：\(error.localizedDescription)"
+            }
+        }
+    }
+
+    private static func kindCode(_ label: String) -> String {
+        switch label {
+        case "音乐": return "music"
+        case "音效": return "sfx"
+        case "配音": return "voice"
+        case "环境音": return "ambience"
+        default: return label
+        }
     }
 }
 
 struct AgentMenuView: View {
     @ObservedObject var model: AgentViewModel
+    @State private var pendingArchive: LibraryAsset?
+    @State private var showArchiveConfirmation = false
+    @State private var editingAsset: LibraryAsset?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 10) {
+            header
+            Picker("页面", selection: $model.activeTab) {
+                Text("导入").tag("导入")
+                Text("素材库").tag("素材库")
+                Text("设备").tag("设备")
+            }
+            .pickerStyle(.segmented)
+
+            if model.activeTab == "导入" {
+                importPanel
+            } else if model.activeTab == "素材库" {
+                libraryPanel
+            } else {
+                devicePanel
+            }
+
+            if !model.errors.isEmpty {
+                VStack(alignment: .leading, spacing: 4) {
+                    ForEach(model.errors, id: \.self) { error in
+                        Text(error)
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+            }
+            if !model.resultText.isEmpty {
+                Text(model.resultText)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Divider()
             HStack {
-                Image(systemName: "waveform").foregroundStyle(.indigo)
-                Text("SyncCut 助手").font(.headline)
+                Button("准备缓存") { model.prepareCache() }
+                Button("打开缓存") { model.openCache() }
                 Spacer()
-                Circle().fill(model.paired ? .green : .orange).frame(width: 7, height: 7)
+                Button("退出") { NSApplication.shared.terminate(nil) }
+                    .keyboardShortcut("q")
             }
-            Text(model.status).font(.caption).foregroundStyle(.secondary)
-            Divider()
-            Text("本地缓存目录").font(.caption.weight(.semibold))
-            Text(model.cachePath)
-                .font(.system(size: 10, design: .monospaced))
-                .textSelection(.enabled)
-            HStack {
-                Button("准备缓存目录") { model.prepareCache() }
-                Button("打开目录") { model.openCache() }
-            }
-            Divider()
-            Text("剪映连接：尚未实现").font(.caption).foregroundStyle(.secondary)
-            Button("退出 SyncCut") { NSApplication.shared.terminate(nil) }
-                .keyboardShortcut("q")
+            .font(.caption)
         }
         .padding(14)
-        .frame(width: 300)
+        .frame(width: 420, height: 590)
+        .confirmationDialog(
+            "归档素材？",
+            isPresented: $showArchiveConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("归档素材") {
+                if let asset = pendingArchive {
+                    model.setArchived(asset, archived: true)
+                }
+                pendingArchive = nil
+            }
+            Button("取消", role: .cancel) { pendingArchive = nil }
+        } message: {
+            Text("将“\(pendingArchive?.metadata.name ?? "该素材")”从在用列表中隐藏。不会删除音频文件或历史版本，可在“已归档”中恢复。")
+        }
+        .sheet(item: $editingAsset) { asset in
+            AssetEditorView(asset: asset) { metadata in
+                model.saveMetadata(asset.sourceID, metadata: metadata)
+                editingAsset = nil
+            } onCancel: { editingAsset = nil }
+        }
+    }
+
+    private var header: some View {
+        HStack {
+            Image(systemName: "waveform").foregroundStyle(.indigo)
+            Text("SyncCut 助手").font(.headline)
+            Spacer()
+            Circle().fill(model.paired ? .green : .orange).frame(width: 7, height: 7)
+            Text(model.status).font(.caption2).foregroundStyle(.secondary)
+        }
+    }
+
+    private var devicePanel: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("云端设备连接").font(.subheadline.weight(.semibold))
+                Spacer()
+                Circle().fill(model.paired ? .green : .orange).frame(width: 7, height: 7)
+                Text(model.status).font(.caption2).foregroundStyle(.secondary)
+            }
+            TextField("云端 API 地址，例如 https://api.example.com", text: $model.cloudOrigin)
+                .textFieldStyle(.roundedBorder)
+                .disabled(model.paired)
+            TextField("设备名称", text: $model.deviceName)
+                .textFieldStyle(.roundedBorder)
+                .disabled(model.paired)
+            if let device = model.cloudDevice {
+                Divider()
+                Text(device.deviceName).font(.caption.weight(.semibold))
+                Text("设备 ID：\(device.deviceId)")
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+                Text("工作区：\(device.tenantId)")
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+                Button {
+                    model.runNextCloudJob()
+                } label: {
+                    if model.isRunningCloudJob {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Label("检查并执行云端素材任务", systemImage: "arrow.down.circle")
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(model.isRunningCloudJob)
+                Button("解除本机配对") { model.disconnectCloudDevice() }
+                    .disabled(model.isRunningCloudJob)
+                    .buttonStyle(.bordered)
+            } else {
+                SecureField("输入飞书控制台生成的 16 位一次性配对码", text: $model.pairingCode)
+                    .textFieldStyle(.roundedBorder)
+                    .textCase(.uppercase)
+                    .disabled(model.isPairing)
+                Button {
+                    model.pairCloudDevice()
+                } label: {
+                    if model.isPairing {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Label("配对这台 Mac", systemImage: "link")
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(model.isPairing || model.cloudOrigin.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || model.pairingCode.filter { $0.isHexDigit }.count != 16 || model.deviceName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+            if !model.cloudMessage.isEmpty {
+                Text(model.cloudMessage)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 0)
+            Text("设备凭证保存在 macOS 钥匙串，不写入偏好设置或普通配置文件。设备可以在 Web 控制台单独撤销。")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private var importPanel: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("本地素材导入").font(.subheadline.weight(.semibold))
+                Spacer()
+                if model.isWorking { ProgressView().controlSize(.small) }
+            }
+            Text("第一步：添加音频。第二步：确认导入。").font(.caption).foregroundStyle(.secondary)
+            pickerRow("素材库", detail: model.libraryURL == nil ? "请选择保存位置" : "已准备好，可点击更换", icon: "externaldrive") {
+                model.choose(.library)
+            }
+            if !model.advancedImport {
+                Button { model.choose(.directAudio) } label: {
+                    Label("添加音频", systemImage: "plus").frame(maxWidth: .infinity)
+                }.buttonStyle(.borderedProminent).disabled(model.libraryURL == nil || model.isWorking)
+                Text("支持选择多个音频文件或文件夹").font(.caption).foregroundStyle(.secondary)
+                if let scan = model.audioScan {
+                    Text("共检查 \(scan.preview.items.count + scan.notices.count) 项").font(.caption)
+                    Text("可导入 \(scan.preview.items.count) · 已存在 \(scan.unchanged) · 跳过 \(scan.notices.filter { !$0.failed }.count - scan.unchanged) · 失败 \(scan.notices.filter(\.failed).count)").font(.caption)
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 4) {
+                            ForEach(scan.preview.items, id: \.sourceID) { item in
+                                Text("\(item.metadata.name) · \(item.hadPreviousVersion ? "更新版本" : "可导入")").font(.caption)
+                            }
+                            ForEach(scan.notices) { notice in Text("\(notice.name) · \(notice.reason)").font(.caption).foregroundStyle(notice.failed ? .red : .secondary) }
+                        }.frame(maxWidth: .infinity, alignment: .leading)
+                    }.frame(maxHeight: 180)
+                    Button("导入素材库") { model.applyImport() }.buttonStyle(.borderedProminent)
+                        .disabled(scan.preview.items.isEmpty || model.isWorking)
+                }
+                Button("查看素材库") { model.activeTab = "素材库" }
+                Button("使用 CSV 高级导入") { model.advancedImport = true; model.preview = nil; model.audioScan = nil }.disabled(model.isWorking)
+                Spacer(minLength: 0)
+            } else {
+            Button("返回简单导入") { model.advancedImport = false; model.preview = nil }.disabled(model.isWorking)
+            pickerRow("素材清单", detail: model.tableURL?.lastPathComponent ?? "选择 CSV 文件", icon: "tablecells") {
+                model.choose(.table)
+            }
+            pickerRow("音频目录", detail: model.audioURL?.lastPathComponent ?? "选择音频文件夹", icon: "folder") {
+                model.choose(.audio)
+            }
+            Button { model.runPreview() } label: {
+                Label("检查并预览", systemImage: "doc.magnifyingglass")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(!model.canPreview)
+
+            if let preview = model.preview {
+                Divider()
+                HStack(spacing: 12) {
+                    metric("可导入", value: "\(preview.readyCount)")
+                    metric("新素材", value: "\(preview.newCount)")
+                    metric("已有", value: "\(preview.existingCount)")
+                    metric("错误", value: "\(preview.errors.count)")
+                }
+                if !preview.errors.isEmpty {
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 5) {
+                            ForEach(preview.errors) { error in
+                                Text("第 \(error.row) 行：\(error.message)")
+                                    .font(.caption).foregroundStyle(.red)
+                            }
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .frame(maxHeight: 110)
+                } else {
+                    Button { model.applyImport() } label: {
+                        Label("确认导入", systemImage: "square.and.arrow.down")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(.green)
+                    .disabled(!model.canImport)
+                }
+            }
+            }
+        }
+    }
+
+    private var libraryPanel: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("素材库").font(.subheadline.weight(.semibold))
+                Spacer()
+                Button("选择目录") { model.choose(.library) }
+                Button { model.refreshLibrary() } label: {
+                    Image(systemName: "arrow.clockwise")
+                }
+                .help("刷新素材库")
+                .disabled(model.libraryURL == nil)
+            }
+            if model.libraryURL != nil {
+                HStack(spacing: 5) {
+                    Image(systemName: "folder").foregroundStyle(.secondary)
+                    Text("已选择素材库")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                    Spacer(minLength: 0)
+                    Button { model.openLibrary() } label: {
+                        Image(systemName: "arrow.up.right.square")
+                    }
+                    .buttonStyle(.plain)
+                    .help("在 Finder 中打开")
+                }
+            } else {
+                Text("先选择一个素材库目录，或在“导入”页面创建素材库。")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            TextField("搜索名称、项目、集数、场景、标签…", text: $model.searchText)
+                .textFieldStyle(.roundedBorder)
+                .disabled(model.libraryURL == nil)
+
+            HStack(spacing: 8) {
+                Picker("状态", selection: $model.showArchived) {
+                    Text("在用").tag(false)
+                    Text("已归档").tag(true)
+                }
+                .pickerStyle(.segmented)
+                Picker("类型", selection: $model.kindFilter) {
+                    Text("全部").tag("全部")
+                    Text("音乐").tag("音乐")
+                    Text("音效").tag("音效")
+                    Text("配音").tag("配音")
+                    Text("环境音").tag("环境音")
+                }
+                .pickerStyle(.menu)
+                .frame(width: 105)
+            }
+
+            HStack {
+                Text("显示 \(model.visibleAssets.count) 项 · 素材库共 \(model.libraryAssets.count) 项")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                if model.isWorking { ProgressView().controlSize(.small) }
+            }
+
+            if model.libraryURL == nil {
+                Spacer()
+                Image(systemName: "externaldrive")
+                    .font(.largeTitle)
+                    .foregroundStyle(.tertiary)
+                    .frame(maxWidth: .infinity)
+                Text("尚未选择素材库")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Spacer()
+            } else if model.visibleAssets.isEmpty {
+                Spacer()
+                Image(systemName: model.showArchived ? "archivebox" : "waveform")
+                    .font(.largeTitle)
+                    .foregroundStyle(.tertiary)
+                    .frame(maxWidth: .infinity)
+                Text(model.searchText.isEmpty ? "这里还没有素材" : "没有匹配的素材")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Spacer()
+            } else {
+                ScrollView {
+                    LazyVStack(spacing: 6) {
+                        ForEach(model.visibleAssets) { asset in
+                            assetRow(asset)
+                        }
+                    }
+                    .padding(.vertical, 2)
+                }
+                .frame(maxHeight: model.selectedAsset == nil ? 275 : 185)
+
+                if let asset = model.selectedAsset {
+                    Divider()
+                    assetDetails(asset)
+                }
+            }
+        }
+    }
+
+    private func assetRow(_ asset: LibraryAsset) -> some View {
+        HStack(spacing: 7) {
+            Button { model.selectAsset(asset) } label: {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(asset.metadata.name)
+                        .font(.caption.weight(.semibold))
+                        .lineLimit(1)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    Text(assetLocation(asset))
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    Text("\(kindLabel(asset.metadata.kind)) · \(asset.versions.count) 个版本 · \(byteLabel(asset.versions.last?.sizeBytes ?? 0))")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            if let latest = asset.versions.last {
+                Button {
+                    model.togglePlayback(asset, version: latest)
+                } label: {
+                    Image(systemName: model.isPlaying(asset, version: latest) ? "pause.fill" : "play.fill")
+                        .frame(width: 24, height: 24)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .help("试听最新版本")
+            }
+            if asset.isArchived {
+                Button("恢复") { model.setArchived(asset, archived: false) }
+                    .controlSize(.small)
+                    .help("恢复到在用列表")
+            } else {
+                Button {
+                    pendingArchive = asset
+                    showArchiveConfirmation = true
+                } label: {
+                    Image(systemName: "archivebox")
+                        .frame(width: 24, height: 24)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .help("归档素材，不删除文件")
+            }
+        }
+        .padding(8)
+        .background(
+            model.selectedAssetID == asset.sourceID
+                ? Color.accentColor.opacity(0.13)
+                : Color.secondary.opacity(0.06)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 9))
+    }
+
+    private func assetDetails(_ asset: LibraryAsset) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text("版本历史").font(.caption.weight(.semibold))
+                Spacer()
+                Button("编辑信息") { editingAsset = asset }
+                Text(asset.metadata.project.isEmpty ? "未填写项目" : asset.metadata.project)
+                    .font(.caption2).foregroundStyle(.secondary)
+            }
+            if !asset.metadata.notes.isEmpty {
+                Text(asset.metadata.notes)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+            }
+            if !asset.metadata.tags.isEmpty {
+                Text("标签：" + asset.metadata.tags.joined(separator: " · "))
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            ScrollView {
+                VStack(alignment: .leading, spacing: 4) {
+                    ForEach(asset.versions.reversed()) { version in
+                        HStack(spacing: 6) {
+                            Text("v\(version.version)")
+                                .font(.caption.weight(.semibold).monospacedDigit())
+                                .frame(width: 30, alignment: .leading)
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(version.filename).font(.caption2).lineLimit(1)
+                                Text(byteLabel(version.sizeBytes))
+                                    .font(.system(size: 9, design: .monospaced))
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer(minLength: 0)
+                            Button {
+                                model.togglePlayback(asset, version: version)
+                            } label: {
+                                Image(systemName: model.isPlaying(asset, version: version) ? "pause.fill" : "play.fill")
+                            }
+                            .buttonStyle(.plain)
+                            .help("试听此版本")
+                            Button {
+                                model.revealVersion(version)
+                            } label: {
+                                Image(systemName: "folder")
+                            }
+                            .buttonStyle(.plain)
+                            .help("在 Finder 中显示文件")
+                        }
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .frame(maxHeight: 92)
+        }
+    }
+
+    private func pickerRow(
+        _ title: String,
+        detail: String,
+        icon: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            HStack(spacing: 8) {
+                Image(systemName: icon).frame(width: 18)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title).font(.caption.weight(.semibold))
+                    Text(detail)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
+            .contentShape(Rectangle())
+        }
+        .disabled(model.isWorking)
+        .buttonStyle(.plain)
+    }
+
+    private func metric(_ title: String, value: String) -> some View {
+        VStack(spacing: 2) {
+            Text(value).font(.title3.weight(.semibold).monospacedDigit())
+            Text(title).font(.caption2).foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private func kindLabel(_ kind: String) -> String {
+        switch kind {
+        case "music": return "音乐"
+        case "sfx": return "音效"
+        case "voice": return "配音"
+        case "ambience": return "环境音"
+        default: return kind.isEmpty ? "未分类" : kind
+        }
+    }
+
+    private func assetLocation(_ asset: LibraryAsset) -> String {
+        [asset.metadata.project, asset.metadata.episode, asset.metadata.scene, asset.metadata.shot]
+            .filter { !$0.isEmpty }
+            .joined(separator: " · ")
+    }
+
+    private func byteLabel(_ bytes: Int64) -> String {
+        ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
+    }
+}
+
+
+private struct AssetEditorView: View {
+    @State private var metadata: AssetMetadata
+    @State private var tags: String
+    @State private var timing: [String]
+    @State private var error = ""
+    let onSave: (AssetMetadata) -> Void
+    let onCancel: () -> Void
+
+    init(asset: LibraryAsset, onSave: @escaping (AssetMetadata) -> Void, onCancel: @escaping () -> Void) {
+        _metadata = State(initialValue: asset.metadata)
+        _tags = State(initialValue: asset.metadata.tags.joined(separator: ", "))
+        let t = asset.metadata.timing
+        _timing = State(initialValue: [t.start, t.inPoint, t.outPoint, t.volume, t.fadeIn, t.fadeOut].map { $0.map(String.init(describing:)) ?? "" })
+        self.onSave = onSave
+        self.onCancel = onCancel
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("编辑素材信息").font(.headline)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 8) {
+                    TextField("素材名称", text: $metadata.name)
+                    Picker("类型", selection: $metadata.kind) {
+                        Text("未分类").tag(""); Text("音乐").tag("music"); Text("音效").tag("sfx")
+                        Text("配音").tag("voice"); Text("环境音").tag("ambience")
+                    }
+                    TextField("项目名称", text: $metadata.project)
+                    TextField("集数", text: $metadata.episode)
+                    TextField("场景", text: $metadata.scene)
+                    TextField("镜头编号", text: $metadata.shot)
+                    TextField("标签（用逗号分隔）", text: $tags)
+                    TextField("备注", text: $metadata.notes)
+                    Picker("目标音轨", selection: Binding(get: { metadata.timing.track ?? "" }, set: { metadata.timing.track = $0.isEmpty ? nil : $0 })) {
+                        Text("未指定").tag(""); Text("A1").tag("A1"); Text("A2").tag("A2"); Text("A3").tag("A3"); Text("A4").tag("A4")
+                    }
+                    ForEach(Array(["开始时间", "素材入点", "素材出点", "音量", "淡入", "淡出"].enumerated()), id: \.offset) { index, label in
+                        TextField(label, text: Binding(get: { timing[index] }, set: { timing[index] = $0 }))
+                    }
+                }
+            }
+            if !error.isEmpty { Text(error).foregroundStyle(.red).font(.caption) }
+            HStack {
+                Button("取消", action: onCancel)
+                Spacer()
+                Button("保存") { save() }
+                    .disabled(metadata.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+        }.padding(18).frame(width: 350, height: 550)
+    }
+
+    private func save() {
+        let numbers = timing.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+        guard numbers.allSatisfy({ $0.isEmpty || (Double($0).map { $0.isFinite && $0 >= 0 } ?? false) }) else { error = "时间和音量必须是非负数字。"; return }
+        let values = numbers.map { $0.isEmpty ? nil : Double($0) }
+        if let start = values[1], let end = values[2], end <= start { error = "素材出点必须大于素材入点。"; return }
+        var result = metadata
+        result.timing.start = values[0]; result.timing.inPoint = values[1]; result.timing.outPoint = values[2]
+        result.timing.volume = values[3]; result.timing.fadeIn = values[4]; result.timing.fadeOut = values[5]
+        result.tags = tags.split(separator: ",").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
+        onSave(result)
     }
 }

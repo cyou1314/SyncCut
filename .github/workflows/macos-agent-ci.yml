@@ -1,0 +1,25 @@
+name: macOS agent checks
+
+on:
+  push:
+    paths:
+      - "apps/macos-agent/**"
+      - ".github/workflows/macos-agent-ci.yml"
+  pull_request:
+    paths:
+      - "apps/macos-agent/**"
+      - ".github/workflows/macos-agent-ci.yml"
+
+jobs:
+  swift-build:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Show Swift version
+        run: swift --version
+      - name: Build macOS agent
+        working-directory: apps/macos-agent
+        run: swift build
+      - name: Test macOS agent
+        working-directory: apps/macos-agent
+        run: swift test

@@ -8,6 +8,7 @@ let package = Package(
         .executable(name: "SyncCutAgent", targets: ["SyncCutAgent"])
     ],
     targets: [
-        .executableTarget(name: "SyncCutAgent")
+        .executableTarget(name: "SyncCutAgent"),
+        .testTarget(name: "SyncCutAgentTests", dependencies: ["SyncCutAgent"])
     ]
 )
